@@ -175,9 +175,12 @@ None of these is advertised as a calibrated language-wide probability. A token
 has `selected = null` whenever the active mode abstains.
 
 Resource/runtime provenance distinguishes functional execution from an
-official verified run. Resource v3 binds an optimized finite guesser and a
-read-only, completely inventoried extracted HFST/CG bundle. Explicit executable
-overrides, ambient library search paths, and legacy v2 rollback set
+official verified run. Resource v3 binds an optimized guesser and a read-only,
+completely inventoried extracted HFST/CG bundle. The legacy finiteness-v1
+result authorizes productive guessing only when the verified content-addressed
+bundle is exactly f03e; unknown valid v1 bundles are nonproductive/nonofficial
+and malformed proof sections fail closed. Explicit executable overrides,
+ambient library search paths, and legacy v2 rollback set
 `official=false`. The extracted subset is verified, but host-provided ELF
 dependencies are not byte-locked; provenance therefore states
 `byte_closed=false` rather than implying a hermetic operating-system image.

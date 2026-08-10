@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import math
 import os
 from pathlib import Path
 import subprocess
@@ -30,6 +31,14 @@ CONTROL_SUPERBLANKS = {
 PROTECTED_CHARACTERS = frozenset("\\^$/<>{}[]@#*+~|=&`")
 RESOURCE_MANIFEST_V2 = "qazmorph-resource-manifest-v2"
 RESOURCE_MANIFEST_V3 = "qazmorph-resource-manifest-v3"
+GUESSER_FINITE_SCHEMA_V1 = "qazmorph-guesser-finiteness-v1"
+# The v1 gate predates the stronger bundle-independent verifier contract.  Its
+# result is trusted only as part of the exact, content-addressed f03e release
+# whose proof metadata and resource hashes were reviewed together.
+PINNED_LEGACY_V1_BUNDLE_ID = (
+    "f03e703d3e2a67044a7d91fd7d575b92cb4e61aa782fb67cff91b0a5ff0ebd5a"
+)
+GENERATION_QUERY_BYTE_LIMIT = 4096
 RESOURCE_FILES_BY_SCHEMA = {
     RESOURCE_MANIFEST_V2: frozenset(
         {
@@ -225,7 +234,19 @@ def _candidate_resource_dirs(explicit: str | os.PathLike[str] | None) -> list[Pa
     return candidates
 
 
-def _has_verified_v3_guesser_gate(manifest: dict[str, Any]) -> bool:
+def _v1_guesser_gate_sections(
+    manifest: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]] | None:
+    """Return a structurally valid legacy-v1 proof, never a partial section.
+
+    A content-addressed but previously unknown v1 bundle may still be used for
+    dictionary analysis/generation as a nonofficial rollback.  It must not get
+    that rollback merely by placing the string ``finiteness-v1`` above missing
+    or type-confused proof sections, however.
+    """
+
+    if manifest.get("schema") != RESOURCE_MANIFEST_V3:
+        return None
     try:
         result = manifest["build"]["verification"][
             "productive_guesser_finite_valued"
@@ -234,13 +255,49 @@ def _has_verified_v3_guesser_gate(manifest: dict[str, Any]) -> bool:
         probes = result["no_cap_probes"]
         optimized = result["optimized_runtime"]
     except (KeyError, TypeError):
+        return None
+    if not all(
+        isinstance(section, dict)
+        for section in (result, graph, probes, optimized)
+    ):
+        return None
+
+    def boolean(value: object) -> bool:
+        return isinstance(value, bool)
+
+    def nonnegative_integer(value: object) -> bool:
+        return (
+            isinstance(value, int)
+            and not isinstance(value, bool)
+            and value >= 0
+        )
+
+    if not (
+        result.get("schema") == GUESSER_FINITE_SCHEMA_V1
+        and boolean(graph.get("reachable_input_epsilon_cycle"))
+        and boolean(probes.get("all_lemmas_match_bounded_root_relation"))
+        and nonnegative_integer(probes.get("cycle_markers"))
+        and boolean(optimized.get("full_relation_equivalent_to_standard"))
+        and boolean(optimized.get("candidate_sets_equal_to_standard"))
+        and nonnegative_integer(optimized.get("cycle_markers"))
+    ):
+        return None
+    return result, graph, probes, optimized
+
+
+def _has_verified_v3_guesser_gate(manifest: dict[str, Any]) -> bool:
+    """Accept the reviewed v1 result only after caller-verified bundle identity."""
+
+    sections = _v1_guesser_gate_sections(manifest)
+    if sections is None:
         return False
+    _result, graph, probes, optimized = sections
 
     def zero(value: object) -> bool:
         return isinstance(value, int) and not isinstance(value, bool) and value == 0
 
     return (
-        result.get("schema") == "qazmorph-guesser-finiteness-v1"
+        manifest.get("bundle_id") == PINNED_LEGACY_V1_BUNDLE_ID
         and graph.get("reachable_input_epsilon_cycle") is False
         and probes.get("all_lemmas_match_bounded_root_relation") is True
         and zero(probes.get("cycle_markers"))
@@ -248,6 +305,32 @@ def _has_verified_v3_guesser_gate(manifest: dict[str, Any]) -> bool:
         and optimized.get("candidate_sets_equal_to_standard") is True
         and zero(optimized.get("cycle_markers"))
     )
+
+
+def _v3_guesser_gate_schema(manifest: dict[str, Any]) -> str | None:
+    try:
+        result = manifest["build"]["verification"][
+            "productive_guesser_finite_valued"
+        ]["result"]
+    except (KeyError, TypeError):
+        return None
+    if not isinstance(result, dict):
+        return None
+    schema = result.get("schema")
+    return schema if isinstance(schema, str) else None
+
+
+def _guesser_safety_reason(manifest: dict[str, Any], *, verified: bool) -> str:
+    if manifest.get("schema") != RESOURCE_MANIFEST_V3:
+        return "legacy resource v2 has no verifiable finite-guesser gate"
+    if verified:
+        return "pinned legacy f03e resource v3 embeds its reviewed finiteness-v1 gate"
+    if _v3_guesser_gate_schema(manifest) == GUESSER_FINITE_SCHEMA_V1:
+        return (
+            "resource v3 finiteness-v1 proof is trusted only for pinned legacy "
+            f"bundle {PINNED_LEGACY_V1_BUNDLE_ID}; productive guesser disabled"
+        )
+    return "resource v3 finite-guesser proof is missing or invalid"
 
 
 class FSTBackend:
@@ -267,14 +350,8 @@ class FSTBackend:
         self.guesser_format = "optimized" if self.guesser_optimized else "standard"
         self.guesser_verified_finite = _has_verified_v3_guesser_gate(self.manifest)
         self.guesser_productive_safe = self.guesser_verified_finite
-        self.guesser_safety_reason = (
-            "resource v3 embeds the required finite optimized-guesser gate"
-            if self.guesser_verified_finite
-            else (
-                "resource v3 finite-guesser proof is missing or invalid"
-                if self.manifest["schema"] == RESOURCE_MANIFEST_V3
-                else "legacy resource v2 has no verifiable finite-guesser gate"
-            )
+        self.guesser_safety_reason = _guesser_safety_reason(
+            self.manifest, verified=self.guesser_verified_finite
         )
         self.guesser_path = self.resource_dir / (
             "kaz.guesser.automorf.hfstol"
@@ -378,9 +455,13 @@ class FSTBackend:
         ):
             raise BackendError(f"Resource manifest provenance is incomplete: {path}")
         if schema == RESOURCE_MANIFEST_V3 and not _has_verified_v3_guesser_gate(manifest):
-            raise BackendError(
-                f"Resource v3 finite-guesser verification is missing or invalid: {path}"
-            )
+            # Structurally complete v1 proofs from unknown content-addressed
+            # bundles remain usable only for nonproductive rollback.  Missing
+            # or malformed proof sections are resource-integrity failures.
+            if _v1_guesser_gate_sections(manifest) is None:
+                raise BackendError(
+                    f"Resource v3 finite-guesser verification is missing or malformed: {path}"
+                )
         for name, metadata in files.items():
             resource = self.resource_dir / name
             if not isinstance(metadata, dict) or not resource.is_file():
@@ -1155,7 +1236,8 @@ class FSTBackend:
         else:
             if not self.guesser_verified_finite:
                 non_official_reasons.append(
-                    "resource v3 has no verified finite-guesser proof"
+                    "resource v3 has no verified finite-guesser proof: "
+                    + self.guesser_safety_reason
                 )
             if verification_error is None and not inventory.get(
                 "integrity_seal_verified",
@@ -1494,8 +1576,27 @@ class FSTBackend:
         return contextual if contextual is not None else lattice
 
     def generate(self, lexical_form: str, *, limit: int = 128, timeout: float = 10.0) -> list[str]:
-        if limit < 1:
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
             raise ValueError("generation limit must be positive")
+        if (
+            not isinstance(timeout, (int, float))
+            or isinstance(timeout, bool)
+            or not math.isfinite(timeout)
+            or timeout <= 0
+        ):
+            raise ValueError("generation timeout must be finite and positive")
+        if not isinstance(lexical_form, str) or not lexical_form:
+            raise ValueError("generation query must be a nonempty string")
+        if any(
+            character in "\t\r\n\0"
+            or unicodedata.category(character) in {"Cc", "Cs", "Zl", "Zp"}
+            for character in lexical_form
+        ):
+            raise ValueError("generation query contains a record delimiter")
+        if len(lexical_form.encode("utf-8")) > GENERATION_QUERY_BYTE_LIMIT:
+            raise ValueError(
+                "exact morphology query exceeds the bounded generator input size"
+            )
         generator = self.resource_dir / "kaz.autogen.hfstol"
         if not self.hfst_optimized_lookup or not generator.is_file():
             raise BackendError("Morphological generator resource or hfst-optimized-lookup is unavailable")

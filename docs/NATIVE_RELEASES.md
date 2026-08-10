@@ -141,8 +141,11 @@ and no executable override.
 
 CPython's Windows selector cannot wait on anonymous subprocess pipes. The
 productive HFST guesser consequently uses a bounded one-shot child on Windows,
-with the same input, output, line, byte, timeout, protocol-correlation, and
-cleanup gates. POSIX builds retain the faster persistent worker.
+with the same caller-specific input bound, strict UTF-8 and mode-specific HFST
+grammar, output line/byte bounds, absolute deadline, completion status,
+protocol-correlation, and cleanup gates. The one-shot command requests one
+extra result as a completeness sentinel and its bounded readers always reap the
+child. POSIX builds retain the faster persistent worker.
 
 Windows ZIP extraction does not supply a portable POSIX executable bit, and
 `os.access(path, os.X_OK)` is therefore evidence only. Helper availability is

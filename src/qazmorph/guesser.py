@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from collections import OrderedDict
-from dataclasses import replace
+from dataclasses import dataclass, replace
 import math
 import os
+from pathlib import Path
 import selectors
 import subprocess
 import sys
@@ -24,6 +25,8 @@ from .types import Analysis
 VOWELS = frozenset("аәеёиіоөұүуыэюя")
 KAZAKH_CYRILLIC = frozenset("аәбвгғдеёжзийкқлмнңоөпрстуұүфхһцчшщъыіьэюя")
 MAX_GUESS_SURFACE_LENGTH = 32
+MAX_GUESS_REQUEST_BYTES = MAX_GUESS_SURFACE_LENGTH * 4
+MAX_LOOKUP_REQUEST_BYTES = 4096
 GUESS_CACHE_CAPACITY = 8192
 CYCLE_MARKER = "[...cyclic...]"
 WINDOWS_STDERR_BYTE_CAP = 65_536
@@ -70,6 +73,24 @@ class _LookupProtocolFailure(_LookupFailure):
     pass
 
 
+@dataclass(frozen=True, slots=True)
+class _LookupResponse:
+    """A bounded response plus whether its terminating record was observed."""
+
+    lines: tuple[str, ...]
+    complete: bool
+    reason: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _GuessOutcome:
+    """One cache-stable result without collapsing failure into a true zero."""
+
+    candidates: tuple[Analysis, ...]
+    complete: bool
+    reason: str | None = None
+
+
 def productive_root_kind(
     surface: str, lemma: str
 ) -> Literal["identity", "stem_final_alternation"] | None:
@@ -106,9 +127,16 @@ class _PersistentLookupWorker:
     mistaken for a complete guess lattice.
     """
 
-    def __init__(self, command: Sequence[str], environment: Mapping[str, str]) -> None:
+    def __init__(
+        self,
+        command: Sequence[str],
+        environment: Mapping[str, str],
+        *,
+        working_directory: Path | None = None,
+    ) -> None:
         self.command = tuple(command)
         self.environment = dict(environment)
+        self.working_directory = working_directory
         self._process: subprocess.Popen[bytes] | None = None
         self._pending = b""
         self._stderr_buffer = bytearray()
@@ -120,6 +148,8 @@ class _PersistentLookupWorker:
         self.idle_restart_count = 0
         self.protocol_restart_count = 0
         self.oneshot_reap_count = 0
+        self.leading_separator_record_count = 0
+        self.leading_separator_byte_count = 0
         # Production helpers accept options immediately after argv[0]. Tests
         # may run a Python script explicitly and move this insertion point
         # past the interpreter and script path.
@@ -179,6 +209,11 @@ class _PersistentLookupWorker:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 env=self.environment,
+                cwd=(
+                    str(self.working_directory)
+                    if sys.platform == "win32" and self.working_directory
+                    else None
+                ),
                 bufsize=0,
             )
         except OSError as exc:
@@ -229,29 +264,101 @@ class _PersistentLookupWorker:
             process.wait()
         self._close_streams(process)
 
-    def _reset_after_protocol_error(self, *, retrying: bool) -> None:
-        """Discard an uncorrelated worker response before a bounded retry."""
+    def _reset_after_protocol_error(
+        self, *, retrying: bool, timeout: float | None = None
+    ) -> bool:
+        """Discard an uncorrelated response without escaping the caller deadline."""
 
         self._ensure_process_identity()
-        with self._lock:
+        if timeout is None:
+            acquired = self._lock.acquire()
+        else:
+            acquired = self._lock.acquire(blocking=False)
+            if not acquired and timeout > 0:
+                acquired = self._lock.acquire(timeout=timeout)
+        if not acquired:
+            return False
+        try:
             if retrying:
                 self.protocol_restart_count += 1
             self._abort()
+            return True
+        finally:
+            self._lock.release()
 
-    def _discard_buffered_response_separators(self) -> int:
-        """Consume redundant blank records already buffered after a response."""
+    def _discard_buffered_response_separators(self) -> tuple[int, int]:
+        """Consume buffered blank records and return record/byte counts."""
 
-        discarded = 0
+        records = 0
+        discarded_bytes = 0
         while True:
             if self._pending.startswith(b"\r\n"):
                 self._pending = self._pending[2:]
-                discarded += 2
+                records += 1
+                discarded_bytes += 2
                 continue
             if self._pending.startswith(b"\n"):
                 self._pending = self._pending[1:]
-                discarded += 1
+                records += 1
+                discarded_bytes += 1
                 continue
-            return discarded
+            return records, discarded_bytes
+
+    @staticmethod
+    def _decode_response_record(raw_line: bytes, *, context: str) -> str:
+        """Decode exactly one LF-delimited HFST record, rejecting ambiguity."""
+
+        if raw_line.endswith(b"\r"):
+            raw_line = raw_line[:-1]
+        if b"\r" in raw_line:
+            raise _LookupProtocolFailure(f"{context} contains a bare CR")
+        try:
+            decoded = raw_line.decode("utf-8", errors="strict")
+        except UnicodeDecodeError as exc:
+            raise _LookupProtocolFailure(f"{context} is not valid UTF-8") from exc
+        printable = decoded.replace("\t", "")
+        if printable and not printable.isprintable():
+            raise _LookupProtocolFailure(
+                f"{context} contains a Unicode control or separator"
+            )
+        return decoded
+
+    @staticmethod
+    def _candidate_analysis_shape_valid(candidate: str) -> bool:
+        """Match the parser's cheap acceptance gate without projecting UD twice."""
+
+        if (
+            not candidate
+            or candidate.startswith("*")
+            or candidate.endswith("+?")
+        ):
+            return False
+
+        # ``parse_analysis`` first splits on unescaped ``+`` and then searches
+        # each part for ``<([^<>]+)>``.  Mirror only that acceptance predicate
+        # here; the caller still performs the full projection exactly once when
+        # materializing candidates.  This avoids doing all UD/morpheme work a
+        # second time solely for protocol validation.
+        escaped = False
+        tag_length = -1
+        for character in candidate:
+            was_escaped = escaped
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+
+            if character == "+" and not was_escaped:
+                tag_length = -1
+            elif character == "<":
+                tag_length = 0
+            elif character == ">":
+                if tag_length > 0:
+                    return True
+                tag_length = -1
+            elif tag_length >= 0:
+                tag_length += 1
+        return False
 
     def close(self) -> None:
         """Close the pipe; a later query may lazily start a fresh worker."""
@@ -287,41 +394,144 @@ class _PersistentLookupWorker:
         max_lines: int,
         timeout: float,
         max_bytes: int,
-    ) -> list[str]:
-        if max_lines < 1 or max_bytes < 1 or timeout <= 0:
+        max_request_bytes: int = MAX_LOOKUP_REQUEST_BYTES,
+    ) -> _LookupResponse:
+        integer_bounds = (max_lines, max_bytes, max_request_bytes)
+        if (
+            any(
+                not isinstance(bound, int)
+                or isinstance(bound, bool)
+                or bound < 1
+                for bound in integer_bounds
+            )
+            or not isinstance(timeout, (int, float))
+            or isinstance(timeout, bool)
+            or not math.isfinite(timeout)
+            or timeout <= 0
+        ):
             raise ValueError("HFST lookup bounds must be positive")
+        if not isinstance(surface, str):
+            raise ValueError("HFST lookup surface must be a string")
         if any(character in surface for character in "\r\n\0"):
             raise ValueError("HFST lookup surface contains a record delimiter")
+        encoded_surface = surface.encode("utf-8")
+        if len(encoded_surface) > max_request_bytes:
+            raise ValueError(
+                "HFST lookup request exceeds the encoded byte limit "
+                f"({len(encoded_surface)} > {max_request_bytes})"
+            )
+        request = encoded_surface + b"\n"
 
         self._ensure_process_identity()
-        with self._lock:
+        deadline = time.monotonic() + float(timeout)
+        acquired = self._lock.acquire(blocking=False)
+        if not acquired:
+            remaining = deadline - time.monotonic()
+            if remaining > 0:
+                acquired = self._lock.acquire(timeout=remaining)
+            if not acquired:
+                raise _LookupTimeout(
+                    f"HFST guesser lookup for {surface!r} timed out after "
+                    f"{timeout:.3f}s; partial response discarded"
+                )
+        try:
             if sys.platform == "win32":
-                return self._query_windows_oneshot(
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise _LookupTimeout(
+                        f"HFST guesser lookup for {surface!r} timed out after "
+                        f"{timeout:.3f}s; partial response discarded"
+                    )
+                response = self._query_windows_oneshot(
                     surface,
                     max_lines=max_lines,
-                    timeout=timeout,
+                    timeout=remaining,
                     max_bytes=max_bytes,
                 )
+                if time.monotonic() >= deadline:
+                    raise _LookupTimeout(
+                        f"HFST guesser lookup for {surface!r} timed out after "
+                        f"{timeout:.3f}s during response validation; "
+                        "response discarded"
+                    )
+                return response
             process = self._start()
             assert process.stdin is not None and process.stdout is not None
-            try:
-                process.stdin.write((surface + "\n").encode("utf-8"))
-                process.stdin.flush()
-            except (BrokenPipeError, OSError) as exc:
-                returncode = process.poll()
-                detail = self._stderr(process)
+            if time.monotonic() >= deadline:
                 self._abort()
-                suffix = f": {detail}" if detail else ""
+                raise _LookupTimeout(
+                    f"HFST guesser lookup for {surface!r} timed out after "
+                    f"{timeout:.3f}s while starting the worker; "
+                    "partial response discarded"
+                )
+
+            stdin_fd = process.stdin.fileno()
+            try:
+                os.set_blocking(stdin_fd, False)
+            except OSError as exc:
+                self._abort()
                 raise _LookupFailure(
-                    f"HFST guesser lookup pipe failed"
-                    f"{f' ({returncode})' if returncode is not None else ''}{suffix}"
+                    f"HFST guesser lookup could not make stdin nonblocking: {exc}"
                 ) from exc
+
+            request_offset = 0
+            write_selector = selectors.DefaultSelector()
+            write_selector.register(process.stdin, selectors.EVENT_WRITE, "stdin")
+            if process.stderr is not None:
+                write_selector.register(process.stderr, selectors.EVENT_READ, "stderr")
+            try:
+                while request_offset < len(request):
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        self._abort()
+                        raise _LookupTimeout(
+                            f"HFST guesser lookup for {surface!r} timed out after "
+                            f"{timeout:.3f}s while writing the request; "
+                            "partial request discarded"
+                        )
+                    events = write_selector.select(remaining)
+                    if not events:
+                        self._abort()
+                        raise _LookupTimeout(
+                            f"HFST guesser lookup for {surface!r} timed out after "
+                            f"{timeout:.3f}s while writing the request; "
+                            "partial request discarded"
+                        )
+                    for key, _ in events:
+                        if key.data == "stderr":
+                            stderr_chunk = os.read(key.fileobj.fileno(), 65536)
+                            if stderr_chunk:
+                                self._remember_stderr(stderr_chunk)
+                            else:
+                                write_selector.unregister(key.fileobj)
+                            continue
+                        try:
+                            written = os.write(stdin_fd, request[request_offset:])
+                        except BlockingIOError:
+                            continue
+                        except (BrokenPipeError, OSError) as exc:
+                            returncode = process.poll()
+                            detail = self._stderr(process)
+                            self._abort()
+                            suffix = f": {detail}" if detail else ""
+                            raise _LookupFailure(
+                                "HFST guesser lookup pipe failed"
+                                f"{f' ({returncode})' if returncode is not None else ''}"
+                                f"{suffix}"
+                            ) from exc
+                        if written <= 0:
+                            self._abort()
+                            raise _LookupFailure(
+                                "HFST guesser lookup pipe accepted zero request bytes"
+                            )
+                        request_offset += written
+            finally:
+                write_selector.close()
 
             selector = selectors.DefaultSelector()
             selector.register(process.stdout, selectors.EVENT_READ, "stdout")
             if process.stderr is not None:
                 selector.register(process.stderr, selectors.EVENT_READ, "stderr")
-            deadline = time.monotonic() + timeout
             consumed = 0
             lines: list[str] = []
             try:
@@ -338,16 +548,42 @@ class _PersistentLookupWorker:
                             # one-shot implementation and restart on demand.
                             self.cap_abort_count += 1
                             self._abort()
-                            return lines
-                        if raw_line.endswith(b"\r"):
-                            raw_line = raw_line[:-1]
-                        if not raw_line:
-                            consumed += self._discard_buffered_response_separators()
+                            return _LookupResponse(
+                                tuple(lines), False, "response_cap"
+                            )
+                        if raw_line in {b"", b"\r"}:
+                            separator_records = 1
+                            separator_bytes = newline + 1
+                            extra_records, extra_bytes = (
+                                self._discard_buffered_response_separators()
+                            )
+                            separator_records += extra_records
+                            separator_bytes += extra_bytes
+                            consumed += extra_bytes
+                            if not lines:
+                                self.leading_separator_record_count += separator_records
+                                self.leading_separator_byte_count += separator_bytes
                             if consumed > max_bytes:
                                 self.cap_abort_count += 1
                                 self._abort()
-                            return lines
-                        decoded_line = raw_line.decode("utf-8", errors="replace")
+                                return _LookupResponse(
+                                    tuple(lines), False, "response_cap"
+                                )
+                            if not lines:
+                                # A delayed redundant terminator from the prior
+                                # response must not become this query's empty
+                                # response. Keep waiting for a keyed record under
+                                # the original deadline and byte cap.
+                                continue
+                            return _LookupResponse(tuple(lines), True)
+                        try:
+                            decoded_line = self._decode_response_record(
+                                raw_line,
+                                context="HFST guesser lookup response record",
+                            )
+                        except _LookupProtocolFailure:
+                            self._abort()
+                            raise
                         if CYCLE_MARKER in decoded_line:
                             # This is a semantic HFST truncation, not a regular
                             # candidate.  Count it even for direct/raw callers;
@@ -356,26 +592,37 @@ class _PersistentLookupWorker:
                         if len(lines) < max_lines:
                             lines.append(decoded_line)
                         if len(lines) >= max_lines:
-                            discarded = self._discard_buffered_response_separators()
-                            if discarded:
+                            _, discarded_bytes = (
+                                self._discard_buffered_response_separators()
+                            )
+                            consumed += discarded_bytes
+                            if consumed > max_bytes:
+                                self.cap_abort_count += 1
+                                self._abort()
+                                return _LookupResponse(
+                                    tuple(lines), False, "response_cap"
+                                )
+                            if discarded_bytes:
                                 # The response has exactly ``max_lines`` and
                                 # its terminator arrived in the same read; the
                                 # worker remains synchronized and reusable.
-                                return lines
+                                return _LookupResponse(tuple(lines), True)
                             # hfst-lookup cannot limit non-optimized FST
                             # results itself.  Ending this worker at the exact
                             # public prefix cap avoids an unbounded drain while
                             # preserving candidate order and cap semantics.
                             self.cap_abort_count += 1
                             self._abort()
-                            return lines
+                            return _LookupResponse(
+                                tuple(lines), False, "response_cap"
+                            )
                         continue
 
                     buffered = consumed + len(self._pending)
                     if buffered >= max_bytes:
                         self.cap_abort_count += 1
                         self._abort()
-                        return lines
+                        return _LookupResponse(tuple(lines), False, "response_cap")
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
                         self._abort()
@@ -432,6 +679,8 @@ class _PersistentLookupWorker:
                     self._pending += chunk
             finally:
                 selector.close()
+        finally:
+            self._lock.release()
 
     def _query_windows_oneshot(
         self,
@@ -440,7 +689,7 @@ class _PersistentLookupWorker:
         max_lines: int,
         timeout: float,
         max_bytes: int,
-    ) -> list[str]:
+    ) -> _LookupResponse:
         """Use a bounded fresh HFST process where pipe selectors are invalid.
 
         CPython's Windows selector accepts sockets, not anonymous subprocess
@@ -528,6 +777,7 @@ class _PersistentLookupWorker:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 env=self.environment,
+                cwd=str(self.working_directory) if self.working_directory else None,
                 bufsize=0,
             )
         except OSError as exc:
@@ -723,7 +973,7 @@ class _PersistentLookupWorker:
         *,
         max_lines: int,
         max_bytes: int,
-    ) -> list[str]:
+    ) -> _LookupResponse:
         """Parse one EOF-bounded HFST response without accepting partial data.
 
         Only LF records with an optional immediately preceding CR are valid.
@@ -748,40 +998,19 @@ class _PersistentLookupWorker:
 
         raw_records = payload[:-1].split(b"\n") if payload else []
         lines: list[str] = []
-        for index, raw_line in enumerate(raw_records):
-            if raw_line.endswith(b"\r"):
-                raw_line = raw_line[:-1]
-            if b"\r" in raw_line:
+        saw_terminator = False
+        for raw_line in raw_records:
+            if raw_line in {b"", b"\r"}:
+                saw_terminator = True
+                continue
+            if saw_terminator:
                 raise _LookupProtocolFailure(
-                    "one-shot HFST response contains a bare CR"
+                    "one-shot HFST response has output after its blank terminator"
                 )
-            if not raw_line:
-                if index != len(raw_records) - 1:
-                    raise _LookupProtocolFailure(
-                        "one-shot HFST response has output after its blank terminator"
-                    )
-                break
-            if any(
-                (value < 0x20 and value != 0x09) or value == 0x7F
-                for value in raw_line
-            ):
-                raise _LookupProtocolFailure(
-                    "one-shot HFST response contains an ASCII control byte"
-                )
-            try:
-                decoded_line = raw_line.decode("utf-8", errors="strict")
-            except UnicodeDecodeError as exc:
-                raise _LookupProtocolFailure(
-                    "one-shot HFST response is not valid UTF-8"
-                ) from exc
-            if any(
-                character != "\t"
-                and unicodedata.category(character) in {"Cc", "Cs", "Zl", "Zp"}
-                for character in decoded_line
-            ):
-                raise _LookupProtocolFailure(
-                    "one-shot HFST response contains a Unicode control or separator"
-                )
+            decoded_line = self._decode_response_record(
+                raw_line,
+                context="one-shot HFST response record",
+            )
             if len(lines) >= max_lines:
                 self.cap_abort_count += 1
                 raise _LookupFailure(
@@ -791,7 +1020,7 @@ class _PersistentLookupWorker:
             if CYCLE_MARKER in decoded_line:
                 self.cycle_truncation_count += 1
             lines.append(decoded_line)
-        return lines
+        return _LookupResponse(tuple(lines), True)
 
 
 class OpenClassGuesser:
@@ -837,8 +1066,15 @@ class OpenClassGuesser:
                 "0",
             ]
         )
-        self._worker = _PersistentLookupWorker(command, self.backend.environment)
-        self._cache: OrderedDict[tuple[str, int, bool], tuple[Analysis, ...]] = OrderedDict()
+        helper = Path(command[0])
+        self._worker = _PersistentLookupWorker(
+            command,
+            self.backend.environment,
+            working_directory=helper.parent if helper.is_absolute() else None,
+        )
+        self._cache: OrderedDict[
+            tuple[str, int, bool], _GuessOutcome
+        ] = OrderedDict()
         self._cache_lock = threading.RLock()
         self._owner_pid = os.getpid()
         self._diagnostics = {
@@ -884,6 +1120,10 @@ class OpenClassGuesser:
                 "idle_restarts": self._worker.idle_restart_count,
                 "protocol_restarts": self._worker.protocol_restart_count,
                 "oneshot_reaps": self._worker.oneshot_reap_count,
+                "leading_separator_records": (
+                    self._worker.leading_separator_record_count
+                ),
+                "leading_separator_bytes": self._worker.leading_separator_byte_count,
                 "productive_resource_safe": int(self._productive_safe),
             }
 
@@ -907,27 +1147,90 @@ class OpenClassGuesser:
         timeout: float = 2.0,
         max_bytes: int = 1_500_000,
     ) -> list[str]:
+        return list(
+            self._raw_lookup_detailed(
+                surface,
+                max_lines=max_lines,
+                timeout=timeout,
+                max_bytes=max_bytes,
+            ).lines
+        )
+
+    def _raw_lookup_detailed(
+        self,
+        surface: str,
+        *,
+        max_lines: int = 512,
+        timeout: float = 2.0,
+        max_bytes: int = 1_500_000,
+    ) -> _LookupResponse:
         if not self.available:
-            return []
+            return _LookupResponse((), False, "unavailable")
         first_problem: str | None = None
+        if (
+            not isinstance(timeout, (int, float))
+            or isinstance(timeout, bool)
+            or not math.isfinite(timeout)
+            or timeout <= 0
+        ):
+            raise ValueError("HFST lookup timeout must be finite and positive")
+        deadline = time.monotonic() + float(timeout)
         for attempt in range(2):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise _LookupTimeout(
+                    f"HFST guesser lookup for {surface!r} timed out after "
+                    f"{timeout:.3f}s; partial response discarded"
+                )
             try:
-                lines = self._worker.query(
+                response = self._worker.query(
                     surface,
                     max_lines=max_lines,
-                    timeout=timeout,
+                    timeout=remaining,
                     max_bytes=max_bytes,
+                    max_request_bytes=MAX_GUESS_REQUEST_BYTES,
                 )
-                problem = self._response_protocol_problem(surface, lines)
+                problem = self._response_protocol_problem(
+                    surface, response.lines
+                )
             except _LookupProtocolFailure as exc:
                 problem = str(exc)
+                response = _LookupResponse((), False, "protocol_failure")
+            if time.monotonic() >= deadline:
+                raise _LookupTimeout(
+                    f"HFST guesser lookup for {surface!r} timed out after "
+                    f"{timeout:.3f}s during response validation; "
+                    "response discarded"
+                )
             if problem is None:
-                return lines
+                return response
             if attempt == 0:
                 first_problem = problem
-                self._worker._reset_after_protocol_error(retrying=True)
+                remaining = deadline - time.monotonic()
+                if remaining <= 0 or not self._worker._reset_after_protocol_error(
+                    retrying=True, timeout=remaining
+                ):
+                    raise _LookupTimeout(
+                        f"HFST guesser lookup for {surface!r} timed out after "
+                        f"{timeout:.3f}s while restarting after a protocol error; "
+                        "response discarded"
+                    )
                 continue
-            self._worker._reset_after_protocol_error(retrying=False)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or not self._worker._reset_after_protocol_error(
+                retrying=False, timeout=remaining
+            ):
+                raise _LookupTimeout(
+                    f"HFST guesser lookup for {surface!r} timed out after "
+                    f"{timeout:.3f}s while discarding a protocol error; "
+                    "response discarded"
+                )
+            if time.monotonic() >= deadline:
+                raise _LookupTimeout(
+                    f"HFST guesser lookup for {surface!r} timed out after "
+                    f"{timeout:.3f}s while discarding a protocol error; "
+                    "response discarded"
+                )
             raise _LookupFailure(
                 "HFST guesser lookup protocol could not correlate a complete "
                 f"response for {surface!r} after one restart "
@@ -935,18 +1238,51 @@ class OpenClassGuesser:
             )
         raise AssertionError("bounded HFST protocol retry did not terminate")
 
-    @staticmethod
-    def _response_protocol_problem(surface: str, lines: Sequence[str]) -> str | None:
+    def _response_protocol_problem(
+        self, surface: str, lines: Sequence[str]
+    ) -> str | None:
         if not lines:
             return "zero lines"
+        candidate_records = 0
+        negative_records = 0
         for line in lines:
-            if CYCLE_MARKER in line:
-                continue
             fields = line.split("\t")
-            if len(fields) < 2:
-                return "malformed line"
+            if not fields:
+                return "empty record"
             if fields[0] != surface:
                 return f"surface {fields[0]!r}"
+            if self._optimized:
+                if fields == [surface, surface, "+?"]:
+                    negative_records += 1
+                    continue
+                if len(fields) != 2:
+                    return "optimized record does not have exactly two fields"
+            else:
+                if fields == [surface, f"{surface}+?", "inf"]:
+                    negative_records += 1
+                    continue
+                if len(fields) != 3:
+                    return "standard record does not have exactly three fields"
+                try:
+                    weight = float(fields[2])
+                except ValueError:
+                    return "standard record has a nonnumeric weight"
+                if not math.isfinite(weight):
+                    return "standard candidate has a nonfinite weight"
+
+            candidate = fields[1]
+            if not candidate:
+                return "empty candidate"
+            if any(character in candidate for character in "[]{}"):
+                return "candidate contains a control marker"
+            if not self._worker._candidate_analysis_shape_valid(candidate):
+                return "candidate is not a valid analysis"
+            candidate_records += 1
+        if negative_records:
+            if negative_records != 1:
+                return "duplicate negative records"
+            if candidate_records:
+                return "mixed negative and candidate records"
         return None
 
     @staticmethod
@@ -1002,19 +1338,29 @@ class OpenClassGuesser:
             score -= 0.8
         return score
 
-    def _guess_uncached(self, surface: str, limit: int, generate_all: bool) -> tuple[Analysis, ...]:
+    def _guess_uncached_detailed(
+        self,
+        surface: str,
+        limit: int,
+        generate_all: bool,
+        timeout: float,
+    ) -> _GuessOutcome:
         if not self._productive_safe:
             self._diagnostics["unsafe_resource_skips"] += 1
-            return ()
+            return _GuessOutcome((), False, "unsafe_resource")
         if not self._eligible_surface(surface):
             self._diagnostics["prefilter_skips"] += 1
-            return ()
+            return _GuessOutcome((), True)
 
         candidates: dict[tuple[str, str, tuple[tuple[str, str], ...], str], Analysis] = {}
         scored: list[tuple[float, Analysis]] = []
         self._diagnostics["lookup_queries"] += 1
         try:
-            raw_lines = self._raw_lookup(surface, max_lines=2048 if generate_all else 512)
+            raw_response = self._raw_lookup_detailed(
+                surface,
+                max_lines=2048 if generate_all else 512,
+                timeout=timeout,
+            )
         except _LookupTimeout as exc:
             self._diagnostics["timeouts"] += 1
             warnings.warn(
@@ -1022,7 +1368,7 @@ class OpenClassGuesser:
                 RuntimeWarning,
                 stacklevel=3,
             )
-            return ()
+            return _GuessOutcome((), False, "timeout")
         except _LookupFailure as exc:
             self._diagnostics["failures"] += 1
             warnings.warn(
@@ -1030,8 +1376,9 @@ class OpenClassGuesser:
                 RuntimeWarning,
                 stacklevel=3,
             )
-            return ()
+            return _GuessOutcome((), False, "failure")
 
+        raw_lines = raw_response.lines
         if any(CYCLE_MARKER in line for line in raw_lines):
             warnings.warn(
                 "HFST guesser reported a cyclic response; discarding partial "
@@ -1039,12 +1386,17 @@ class OpenClassGuesser:
                 RuntimeWarning,
                 stacklevel=3,
             )
-            return ()
+            return _GuessOutcome((), False, "cyclic_response")
 
         for line in raw_lines:
             if not line:
                 continue
             fields = line.split("\t")
+            if (
+                fields == [surface, surface, "+?"]
+                or fields == [surface, f"{surface}+?", "inf"]
+            ):
+                continue
             if len(fields) < 2 or fields[0] != surface:
                 continue
             parsed = parse_analysis(
@@ -1073,36 +1425,114 @@ class OpenClassGuesser:
         cap = 256 if generate_all else max(1, limit)
         selected = [analysis for _, analysis in scored[:cap]]
         if not selected:
-            return ()
+            return _GuessOutcome(
+                (), raw_response.complete, raw_response.reason
+            )
 
         # Scores in the public API are normalized within the returned lattice.
         numeric_scores = [analysis.score if analysis.score is not None else -math.inf for analysis in selected]
         peak = max(numeric_scores)
         weights = [math.exp(score - peak) for score in numeric_scores]
         total = sum(weights)
-        return tuple(
-            replace(analysis, score=weight / total)
-            for analysis, weight in zip(selected, weights)
+        return _GuessOutcome(
+            tuple(
+                replace(analysis, score=weight / total)
+                for analysis, weight in zip(selected, weights)
+            ),
+            raw_response.complete,
+            raw_response.reason,
         )
 
-    def _guess_cached(self, surface: str, limit: int, generate_all: bool) -> tuple[Analysis, ...]:
+    def _guess_uncached(
+        self, surface: str, limit: int, generate_all: bool
+    ) -> tuple[Analysis, ...]:
+        """Compatibility wrapper for the pre-outcome private helper."""
+
+        return self._guess_uncached_detailed(
+            surface, limit, generate_all, 2.0
+        ).candidates
+
+    def _guess_detailed(
+        self,
+        surface: str,
+        *,
+        limit: int = 8,
+        generate_all: bool = False,
+        timeout: float = 2.0,
+    ) -> _GuessOutcome:
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
+            raise ValueError("guess limit must be positive")
+        if (
+            not isinstance(timeout, (int, float))
+            or isinstance(timeout, bool)
+            or not math.isfinite(timeout)
+            or timeout <= 0
+        ):
+            raise ValueError("guess timeout must be finite and positive")
         key = (surface, limit, generate_all)
         self._ensure_process_identity()
-        with self._cache_lock:
+        deadline = time.monotonic() + float(timeout)
+        acquired = self._cache_lock.acquire(blocking=False)
+        if not acquired:
+            remaining = deadline - time.monotonic()
+            if remaining > 0:
+                acquired = self._cache_lock.acquire(timeout=remaining)
+            if not acquired:
+                self._diagnostics["timeouts"] += 1
+                warnings.warn(
+                    f"guesser cache wait for {surface!r} timed out after "
+                    f"{timeout:.3f}s; returning an explicit unknown analysis for this OOV",
+                    RuntimeWarning,
+                    stacklevel=3,
+                )
+                return _GuessOutcome((), False, "timeout")
+        try:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                self._diagnostics["timeouts"] += 1
+                return _GuessOutcome((), False, "timeout")
             cached = self._cache.get(key)
             if cached is not None:
                 self._diagnostics["cache_hits"] += 1
                 self._cache.move_to_end(key)
                 return cached
             self._diagnostics["cache_misses"] += 1
-            guessed = self._guess_uncached(surface, limit, generate_all)
-            self._cache[key] = guessed
-            self._cache.move_to_end(key)
-            if len(self._cache) > GUESS_CACHE_CAPACITY:
-                self._cache.popitem(last=False)
-            return guessed
+            outcome = self._guess_uncached_detailed(
+                surface,
+                limit,
+                generate_all,
+                remaining,
+            )
+            if outcome.complete and time.monotonic() >= deadline:
+                self._diagnostics["timeouts"] += 1
+                warnings.warn(
+                    f"guesser processing for {surface!r} timed out after "
+                    f"{timeout:.3f}s; returning an explicit unknown analysis for this OOV",
+                    RuntimeWarning,
+                    stacklevel=3,
+                )
+                outcome = _GuessOutcome((), False, "timeout")
+            # Alternate deadlines are diagnostic probes and must not create an
+            # unbounded family of cache policies.  The public two-second path
+            # retains both candidates and the completion bit, including a
+            # stable instance-local failure fallback.
+            if timeout == 2.0:
+                self._cache[key] = outcome
+                self._cache.move_to_end(key)
+                if len(self._cache) > GUESS_CACHE_CAPACITY:
+                    self._cache.popitem(last=False)
+            return outcome
+        finally:
+            self._cache_lock.release()
+
+    def _guess_cached(
+        self, surface: str, limit: int, generate_all: bool
+    ) -> tuple[Analysis, ...]:
+        return self._guess_detailed(
+            surface,
+            limit=limit,
+            generate_all=generate_all,
+        ).candidates
 
     def guess(self, surface: str, *, limit: int = 8, generate_all: bool = False) -> list[Analysis]:
-        if limit < 1:
-            raise ValueError("guess limit must be positive")
         return list(self._guess_cached(surface, limit, generate_all))

@@ -24,6 +24,10 @@ from .tags import UD_PROFILES, project_ud_alternatives
 from .types import Analysis, AnalysisSpan, Document, Morpheme, Token
 
 
+GENERATION_QUERY_BYTE_LIMIT = 4096
+GENERATION_RECORD_CONTROLS = frozenset("<>[]{}\t\r\n\0")
+
+
 @dataclass(frozen=True, slots=True)
 class _AlignedSegment:
     segment: RawSegment
@@ -185,15 +189,32 @@ class Analyzer:
     def generate(self, lemma: str, tags: list[str] | tuple[str, ...], *, limit: int = 128) -> list[str]:
         """Generate surface forms for one exact Apertium-style lexical reading."""
 
-        if limit < 1:
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
             raise ValueError("generation limit must be positive")
-        if any(char in lemma for char in "<>\r\n"):
+        if not isinstance(lemma, str) or not lemma:
+            raise ValueError("lemma must be a nonempty string")
+        if any(
+            char in GENERATION_RECORD_CONTROLS
+            or unicodedata.category(char) in {"Cc", "Cs", "Zl", "Zp"}
+            for char in lemma
+        ):
             raise ValueError("lemma contains reserved morphology syntax")
+        if (
+            isinstance(tags, (str, bytes))
+            or not isinstance(tags, Sequence)
+            or not tags
+            or any(not isinstance(tag, str) for tag in tags)
+        ):
+            raise ValueError("tags must be a nonempty sequence of strings")
         normalized_tags = tuple(tag.strip(" <>") for tag in tags)
         if any(not re.fullmatch(r"[A-Za-z0-9_:-]+", tag) for tag in normalized_tags):
             raise ValueError("invalid morphology tag")
         escaped_lemma = lemma.replace("\\", "\\\\").replace("+", "\\+")
         lexical_form = escaped_lemma + "".join(f"<{tag}>" for tag in normalized_tags)
+        if len(lexical_form.encode("utf-8")) > GENERATION_QUERY_BYTE_LIMIT:
+            raise ValueError(
+                "exact morphology query exceeds the bounded generator input size"
+            )
         return self.backend.generate(lexical_form, limit=limit)
 
     @staticmethod

@@ -890,8 +890,8 @@ class PlatformRuntimeManifestTests(unittest.TestCase):
                     return b""
                 self.assertEqual(input_bytes, b"a\n")
                 if "-n" in command:
-                    return b"a\tb\t0.0\n\n"
-                return b"a\tb\t0.0\na\tc\t0.0\n\n"
+                    return b"a\tb\n\n"
+                return b"a\tb\na\tc\n\n"
 
             with mock.patch.object(windows_probe, "run", side_effect=fake_run), mock.patch(
                 "sys.argv",

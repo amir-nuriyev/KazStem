@@ -151,7 +151,11 @@ Earlier complete bundles are kept for inspection or functional rollback.
 Resource-manifest v2 bundles retain their legacy cyclic standard-lookup
 guesser, so QazMorph deliberately disables productive OOV guessing for them
 and returns explicit unknowns instead. Manifest v3 bundles require the embedded
-finite-relation proof and use the optimized `.hfstol` guesser.
+finite-relation proof and use the optimized `.hfstol` guesser. The historical
+finiteness-v1 proof is activated only for the exact content-addressed f03e
+bundle; an unknown but structurally valid v1 bundle loads only as a
+nonproductive, nonofficial dictionary rollback, and a malformed proof is
+rejected.
 
 Runtime verification re-hashes every compiled resource artifact and every file
 and symlink in the extracted HFST/CG toolchain. Official POSIX runs require both

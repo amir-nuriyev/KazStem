@@ -9,12 +9,16 @@ import unittest
 from unittest import mock
 
 from qazmorph.backend import (
+    _guesser_safety_reason,
+    _has_verified_v3_guesser_gate,
     _hyphen_chains,
     _integrity_seal_status,
     _runtime_executable_file_available,
     BackendError,
     escape_apertium_text,
     FSTBackend,
+    GUESSER_FINITE_SCHEMA_V1,
+    PINNED_LEGACY_V1_BUNDLE_ID,
     RESOURCE_FILES_BY_SCHEMA,
     RESOURCE_MANIFEST_V2,
     RESOURCE_MANIFEST_V3,
@@ -90,6 +94,66 @@ class ApertiumBoundaryTests(unittest.TestCase):
         self.assertTrue(
             {repeated_start + 3, repeated_start + 5} <= protected
         )
+
+
+class DictionaryGeneratorBoundaryTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.backend = FSTBackend.__new__(FSTBackend)
+
+    def test_direct_query_rejects_invalid_limits_and_timeouts_before_launch(self) -> None:
+        for limit in (0, -1, True, False, 1.5, float("inf"), "2"):
+            with self.subTest(limit=limit), self.assertRaisesRegex(
+                ValueError, "generation limit"
+            ):
+                self.backend.generate("сөз<n>", limit=limit)  # type: ignore[arg-type]
+        for timeout in (
+            0,
+            -1,
+            True,
+            False,
+            float("inf"),
+            float("nan"),
+            "2",
+        ):
+            with self.subTest(timeout=timeout), self.assertRaisesRegex(
+                ValueError, "generation timeout"
+            ):
+                self.backend.generate(
+                    "сөз<n>", timeout=timeout  # type: ignore[arg-type]
+                )
+
+    def test_direct_query_rejects_record_injection_and_encoded_overflow(self) -> None:
+        for query in (
+            None,
+            "",
+            "сөз<n>\n",
+            "сөз<n>\r",
+            "сөз<n>\t",
+            "сөз<n>\0",
+            "сөз<n>\x01",
+            "сөз<n>\x85",
+            "сөз<n>\u2028",
+            "сөз<n>\ud800",
+        ):
+            with self.subTest(query=repr(query)), self.assertRaises(ValueError):
+                self.backend.generate(query)  # type: ignore[arg-type]
+        with self.assertRaisesRegex(ValueError, "bounded generator input"):
+            self.backend.generate("a" * 4097)
+
+    def test_direct_query_accepts_exact_4096_byte_boundary(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "kaz.autogen.hfstol").write_bytes(b"generator")
+            self.backend.resource_dir = root
+            self.backend.hfst_optimized_lookup = root / "hfst-optimized-lookup"
+            self.backend.environment = {}
+            query = "a" * 4096
+            completed = mock.Mock(returncode=0, stdout="", stderr="")
+            with mock.patch(
+                "qazmorph.backend.subprocess.run", return_value=completed
+            ) as run:
+                self.assertEqual(self.backend.generate(query), [])
+            self.assertEqual(run.call_args.kwargs["input"], query + "\n")
 
 
 class ResourceManifestTests(unittest.TestCase):
@@ -312,8 +376,16 @@ class ResourceManifestTests(unittest.TestCase):
             with self.assertRaisesRegex(BackendError, "file set"):
                 backend._read_manifest()
 
-    def test_v3_manifest_requires_the_embedded_finite_guesser_proof(self) -> None:
-        for mutation in ("missing", "cycle", "bounded_root", "relation", "candidates"):
+    def test_v3_manifest_rejects_malformed_legacy_finite_guesser_proof(self) -> None:
+        for mutation in (
+            "missing",
+            "result_shape",
+            "graph_shape",
+            "probes_shape",
+            "optimized_shape",
+            "boolean_shape",
+            "count_shape",
+        ):
             with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary)
                 manifest = self.write_resource_manifest(root, RESOURCE_MANIFEST_V3)
@@ -322,20 +394,20 @@ class ResourceManifestTests(unittest.TestCase):
                 ]["result"]
                 if mutation == "missing":
                     manifest["build"].pop("verification")
-                elif mutation == "cycle":
-                    result["graph"]["reachable_input_epsilon_cycle"] = True
-                elif mutation == "bounded_root":
-                    result["no_cap_probes"][
-                        "all_lemmas_match_bounded_root_relation"
-                    ] = False
-                elif mutation == "relation":
-                    result["optimized_runtime"][
-                        "full_relation_equivalent_to_standard"
-                    ] = False
+                elif mutation == "result_shape":
+                    manifest["build"]["verification"][
+                        "productive_guesser_finite_valued"
+                    ]["result"] = []
+                elif mutation == "graph_shape":
+                    result["graph"] = []
+                elif mutation == "probes_shape":
+                    result["no_cap_probes"] = []
+                elif mutation == "optimized_shape":
+                    result["optimized_runtime"] = []
+                elif mutation == "boolean_shape":
+                    result["graph"]["reachable_input_epsilon_cycle"] = 0
                 else:
-                    result["optimized_runtime"][
-                        "candidate_sets_equal_to_standard"
-                    ] = False
+                    result["no_cap_probes"]["cycle_markers"] = False
                 identity = {
                     key: value
                     for key, value in manifest.items()
@@ -354,8 +426,88 @@ class ResourceManifestTests(unittest.TestCase):
                 )
                 backend = FSTBackend.__new__(FSTBackend)
                 backend.resource_dir = root
-                with self.assertRaisesRegex(BackendError, "finite-guesser verification"):
+                with self.assertRaisesRegex(
+                    BackendError, "finite-guesser verification.*malformed"
+                ):
                     backend._read_manifest()
+
+    def test_only_exact_pinned_f03e_v1_gate_can_activate_productive_guessing(self) -> None:
+        manifest = {
+            "schema": RESOURCE_MANIFEST_V3,
+            "bundle_id": PINNED_LEGACY_V1_BUNDLE_ID,
+            "build": self.finite_guesser_gate(),
+        }
+        self.assertEqual(
+            manifest["build"]["verification"][
+                "productive_guesser_finite_valued"
+            ]["result"]["schema"],
+            GUESSER_FINITE_SCHEMA_V1,
+        )
+        self.assertTrue(_has_verified_v3_guesser_gate(manifest))
+
+        manifest["bundle_id"] = "0" * 64
+        self.assertFalse(_has_verified_v3_guesser_gate(manifest))
+
+    def test_forged_v1_cannot_claim_the_pinned_f03e_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = self.write_resource_manifest(
+                root, RESOURCE_MANIFEST_V3
+            )
+            manifest["bundle_id"] = PINNED_LEGACY_V1_BUNDLE_ID
+            (root / "manifest.json").write_text(
+                json.dumps(manifest, ensure_ascii=False), encoding="utf-8"
+            )
+            backend = FSTBackend.__new__(FSTBackend)
+            backend.resource_dir = root
+            with self.assertRaisesRegex(BackendError, "identity checksum"):
+                backend._read_manifest()
+
+    def test_unknown_valid_v1_loads_nonproductive_and_nonofficial(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            resource_dir = root / "resources"
+            resource_dir.mkdir()
+            manifest = self.write_resource_manifest(
+                resource_dir, RESOURCE_MANIFEST_V3
+            )
+            self.assertNotEqual(
+                manifest["bundle_id"], PINNED_LEGACY_V1_BUNDLE_ID
+            )
+
+            loader = FSTBackend.__new__(FSTBackend)
+            loader.resource_dir = resource_dir
+            self.assertEqual(loader._read_manifest(), manifest)
+            self.assertFalse(_has_verified_v3_guesser_gate(manifest))
+
+            backend = self.runtime_backend(
+                resource_dir, manifest, root / "toolchain"
+            )
+            backend.guesser_verified_finite = False
+            backend.guesser_productive_safe = False
+            backend.guesser_safety_reason = _guesser_safety_reason(
+                manifest, verified=False
+            )
+            self.seal_resource_bundle(resource_dir)
+            for platform in ("darwin", "linux", "win32"):
+                with self.subTest(platform=platform), mock.patch(
+                    "qazmorph.backend.sys.platform", platform
+                ):
+                    provenance = backend.runtime_provenance()
+                    self.assertFalse(provenance["official"])
+                    self.assertFalse(
+                        provenance["guesser_runtime"]["productive_safe"]
+                    )
+                    self.assertEqual(
+                        provenance["guesser_runtime"]["reason"],
+                        backend.guesser_safety_reason,
+                    )
+                    self.assertTrue(
+                        any(
+                            backend.guesser_safety_reason in reason
+                            for reason in provenance["non_official_reasons"]
+                        )
+                    )
 
     def test_resource_inventory_requires_exact_bytes_and_a_read_only_seal(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

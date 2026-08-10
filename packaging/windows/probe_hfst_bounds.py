@@ -177,19 +177,24 @@ def main() -> int:
         )
         protocol = _PersistentLookupWorker(("native-probe",), {})
         try:
-            control_rows = protocol._parse_windows_oneshot_response(
+            control_response = protocol._parse_windows_oneshot_response(
                 control_output, max_lines=4096, max_bytes=OUTPUT_CAP
             )
-            bounded_rows = protocol._parse_windows_oneshot_response(
+            bounded_response = protocol._parse_windows_oneshot_response(
                 bounded_output, max_lines=1, max_bytes=OUTPUT_CAP
             )
         except BackendError as exc:
             raise ProbeError(f"semantic helper response violates protocol: {exc}") from exc
+        control_rows = control_response.lines
+        bounded_rows = bounded_response.lines
         if (
-            len(control_rows) < 2
+            not control_response.complete
+            or not bounded_response.complete
+            or len(control_rows) < 2
             or len(bounded_rows) != 1
             or bounded_rows != control_rows[:1]
             or any(row.split("\t", 1)[0] != surface for row in control_rows)
+            or any(len(row.split("\t")) != 2 for row in control_rows)
         ):
             raise ProbeError("semantic -n 1 probe did not preserve exactly one result")
         semantic = {

@@ -20,6 +20,16 @@ Unified native-runtime and Windows portability release.
 - Falls back to bounded one-shot HFST guessing on Windows because CPython's
   Windows selector cannot wait on anonymous subprocess pipes; POSIX retains
   the faster persistent worker.
+- Trusts the historical finiteness-v1 proof only for the exact content-addressed
+  f03e resource bundle. Unknown but well-formed v1 bundles remain available for
+  nonproductive, nonofficial dictionary rollback; malformed proofs are rejected.
+- Enforces strict UTF-8 and the exact standard/optimized HFST response grammars,
+  preserves complete-versus-incomplete lookup outcomes in the cache, drains
+  delayed blank separators, and applies one deadline across lock waits, writes,
+  reads, the bounded retry, and response validation.
+- Validates dictionary-generation lemmas, structured tag containers, encoded
+  4,096-byte request bounds, positive integer limits, and finite timeouts before
+  launching a helper.
 - Requires two from-scratch, distinct-root native builds per platform to
   produce byte-identical archives and bundle-relative verification evidence.
 - Documents unsigned/AuthentiCode and SmartScreen status explicitly and keeps

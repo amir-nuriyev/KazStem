@@ -8,6 +8,70 @@ from qazmorph.backend import BackendError
 from qazmorph.stream import RawSegment, parse_analysis
 
 
+class DictionaryGenerationInputTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.analyzer = Analyzer.__new__(Analyzer)
+        self.analyzer.backend = mock.Mock()
+        self.analyzer.backend.generate.return_value = ["сөз"]
+
+    def test_exact_valid_query_is_forwarded_without_record_loss(self) -> None:
+        self.assertEqual(
+            self.analyzer.generate(r"сөз+түбір\бөлік", ("<n>", " nom ")),
+            ["сөз"],
+        )
+        self.analyzer.backend.generate.assert_called_once_with(
+            r"сөз\+түбір\\бөлік<n><nom>",
+            limit=128,
+        )
+
+    def test_tags_are_a_nonempty_sequence_not_a_string(self) -> None:
+        for tags in ("nom", b"nom", (), [], 1, ("n", 1)):
+            with self.subTest(tags=repr(tags)), self.assertRaisesRegex(
+                ValueError, "tags must be a nonempty sequence"
+            ):
+                self.analyzer.generate("сөз", tags)  # type: ignore[arg-type]
+        self.analyzer.backend.generate.assert_not_called()
+
+    def test_lemma_is_exact_nonempty_text_without_record_controls(self) -> None:
+        for lemma in (
+            None,
+            "",
+            "сөз<n>",
+            "сөз[control]",
+            "сөз{control}",
+            "сөз\t",
+            "сөз\r",
+            "сөз\n",
+            "сөз\0",
+            "сөз\x01",
+            "сөз\x85",
+            "сөз\u2028",
+            "сөз\ud800",
+        ):
+            with self.subTest(lemma=repr(lemma)), self.assertRaises(ValueError):
+                self.analyzer.generate(lemma, ("n",))  # type: ignore[arg-type]
+        self.analyzer.backend.generate.assert_not_called()
+
+    def test_encoded_query_has_an_exact_4096_byte_ceiling(self) -> None:
+        exact = "a" * 4093
+        self.analyzer.generate(exact, ("n",))
+        query = self.analyzer.backend.generate.call_args.args[0]
+        self.assertEqual(len(query.encode("utf-8")), 4096)
+
+        self.analyzer.backend.reset_mock()
+        with self.assertRaisesRegex(ValueError, "bounded generator input"):
+            self.analyzer.generate("a" * 4094, ("n",))
+        self.analyzer.backend.generate.assert_not_called()
+
+    def test_limit_must_be_a_positive_integer_not_bool(self) -> None:
+        for limit in (0, -1, True, False, 1.5, float("inf"), "2"):
+            with self.subTest(limit=limit), self.assertRaisesRegex(
+                ValueError, "generation limit"
+            ):
+                self.analyzer.generate("сөз", ("n",), limit=limit)  # type: ignore[arg-type]
+        self.analyzer.backend.generate.assert_not_called()
+
+
 class _NoGuess:
     def guess(self, *args: object, **kwargs: object) -> list[object]:
         raise AssertionError("CG alignment fallback must not invoke OOV guessing")
