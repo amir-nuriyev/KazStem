@@ -470,10 +470,10 @@ class PlatformRuntimeManifestTests(unittest.TestCase):
             / "qazmorph"
             / "platform_runtime_assets.lock.json"
         ).read_bytes()
-        self.assertEqual(len(base_lock), 1380)
+        self.assertEqual(len(base_lock), 1456)
         self.assertEqual(
             hashlib.sha256(base_lock).hexdigest(),
-            "fbed6da1e6a4be5c97d3e36723d48ec131ccbb3a8f05d22cf2e1e28d4690c4b2",
+            "b2fd6c3925badc568abf207b127e064b42f5ffd63c83516daebdbca35c47000e",
         )
         linux_source = (
             PROJECT_ROOT
@@ -1062,6 +1062,17 @@ class PlatformRuntimeManifestTests(unittest.TestCase):
                 "sha256": "554a776a942e2db65ca34bb6e05e0c258976848203cbece38ababc0067d1ee46",
             },
         )
+        self.assertEqual(
+            entries[("darwin", "arm64")]["resource_bundle_ids"],
+            ["f03e703d3e2a67044a7d91fd7d575b92cb4e61aa782fb67cff91b0a5ff0ebd5a"],
+        )
+        self.assertEqual(
+            entries[("linux", "x86_64")]["resource_bundle_ids"],
+            [
+                "bf1f31ff6e5860585b9e4134f12dcfb9d6df8030ee87b368e5a5f29eb45c1188",
+                "f03e703d3e2a67044a7d91fd7d575b92cb4e61aa782fb67cff91b0a5ff0ebd5a",
+            ],
+        )
         manifest_include = (PROJECT_ROOT / "MANIFEST.in").read_text(
             encoding="utf-8"
         )
@@ -1070,6 +1081,14 @@ class PlatformRuntimeManifestTests(unittest.TestCase):
             PROJECT_ROOT / "packaging" / "linux" / "build_minimal_runtime.py"
         ).read_text(encoding="utf-8")
         self.assertIn("runtimes.sort(key=runtime_sort_key)", linux_builder)
+        self.assertIn(
+            "bf1f31ff6e5860585b9e4134f12dcfb9d6df8030ee87b368e5a5f29eb45c1188",
+            linux_builder,
+        )
+        self.assertIn(
+            "f03e703d3e2a67044a7d91fd7d575b92cb4e61aa782fb67cff91b0a5ff0ebd5a",
+            linux_builder,
+        )
         entries = [
             {"platform": {"system": "windows", "machine": "x86_64"}},
             {"platform": {"system": "darwin", "machine": "arm64"}},

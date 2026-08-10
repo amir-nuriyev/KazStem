@@ -178,6 +178,7 @@ class RealGuesserProtocolTests(unittest.TestCase):
         resource_dirs = os.environ["QAZMORPH_PROTOCOL_RESOURCE_DIRS"].split(
             os.pathsep
         )
+        standard_helper = os.environ.get("QAZMORPH_PROTOCOL_HFST_LOOKUP")
         for resource_dir in resource_dirs:
             for optimized in (True, False):
                 with self.subTest(
@@ -185,6 +186,8 @@ class RealGuesserProtocolTests(unittest.TestCase):
                 ):
                     backend = FSTBackend(resource_dir)
                     backend.guesser_optimized = optimized
+                    if not optimized and standard_helper:
+                        backend.hfst_lookup = Path(standard_helper)
                     guesser = OpenClassGuesser(backend)
                     try:
                         candidates = guesser._raw_lookup(

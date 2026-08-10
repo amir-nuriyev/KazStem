@@ -3,6 +3,10 @@
 This recipe builds the unsigned/not-notarized KazStem 0.2.3 CLI asset tested on
 macOS 15 arm64. It never changes or relabels the f03e resource bytes.
 
+This checked-in binding remains f03e-only. bf1f productive generation is
+pending a real macOS native build and the complete dependency, protocol, and
+practical acceptance gates; the Ubuntu result is not portable evidence.
+
 Build the checked-in source twice at `SOURCE_DATE_EPOCH=1786361661`, require
 byte-identical wheels and normalized sdists, then install the exact wheel into
 an isolated CPython 3.14.3 environment containing the SHA-locked PyInstaller

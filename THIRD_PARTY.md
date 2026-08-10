@@ -45,6 +45,9 @@ resource manifest continues to bind its original Ubuntu r4 build toolchain.
 The active runtime is a separate, checked-in identity generated from
 `scripts/platform_runtime_sources.lock.json`.
 
+This native binding remains f03e-only. bf1f support is pending the complete
+macOS-native build, dependency, protocol, and practical acceptance gates.
+
 The only native input archives are the following Apertium Project.JJ artifacts:
 
 | Archive | Bytes | SHA-256 |
@@ -81,7 +84,9 @@ and the CLI archive is not Developer-ID signed or notarized.
 ## Windows x86-64 detached runtime (0.2.3)
 
 The Windows asset uses the same unchanged f03e resource bundle and a separate
-manifest-bound Project.JJ runtime. The exact original inputs are:
+manifest-bound Project.JJ runtime. This native binding remains f03e-only; bf1f
+support is pending the complete Windows-native build, PE-closure, bounded
+protocol, and practical acceptance gates. The exact original inputs are:
 
 | Archive | Bytes | SHA-256 |
 |---|---:|---|

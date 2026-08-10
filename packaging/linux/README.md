@@ -7,7 +7,8 @@ libraries.
 
 The checked-in runtime binding is:
 
-- resource bundle `f03e703d3e2a67044a7d91fd7d575b92cb4e61aa782fb67cff91b0a5ff0ebd5a`;
+- resource bundles `f03e703d3e2a67044a7d91fd7d575b92cb4e61aa782fb67cff91b0a5ff0ebd5a`
+  and `bf1f31ff6e5860585b9e4134f12dcfb9d6df8030ee87b368e5a5f29eb45c1188`;
 - runtime bundle `39a01ea673d024b0d6080739b5bb23c76daf0f7ed7bdb95dd1157d9dce4b627e`;
 - 9,958-byte runtime manifest with SHA-256
   `67da829d117d39d7de34afbc67dd649be24156fa9fab613aa318b438b9637f4b`.
@@ -51,10 +52,10 @@ remove only PyInstaller's copied `libexpat.so.1` and `libz.so.1`, which the
 audited Ubuntu target resolves at its host boundary.  It must retain a ledger
 of those removals and fail if any other ELF is changed.
 
-Copy the exact f03e resources and content-addressed Linux runtime beside the
-frozen launcher, seal the POSIX bundle read-only, and produce the archive with
-normalized ownership, modes, ordering, and timestamps.  A release candidate
-must pass, from a fresh extraction:
+Copy the exact selected f03e or bf1f resources and content-addressed Linux
+runtime beside the frozen launcher, seal the POSIX bundle read-only, and
+produce the archive with normalized ownership, modes, ordering, and
+timestamps. A release candidate must pass, from a fresh extraction:
 
 1. the 13-command core black-box gate and expanded practical matrix;
 2. all MyStem text/JSON/XML/JSONL formats, OOV, CG, and generation cases;

@@ -20,6 +20,12 @@ def sha256(data: bytes) -> str:
 
 
 RESOURCE_ID = "b" * 64
+BF1F_RESOURCE_ID = (
+    "bf1f31ff6e5860585b9e4134f12dcfb9d6df8030ee87b368e5a5f29eb45c1188"
+)
+F03E_RESOURCE_ID = (
+    "f03e703d3e2a67044a7d91fd7d575b92cb4e61aa782fb67cff91b0a5ff0ebd5a"
+)
 
 
 class PlatformRuntimeTests(unittest.TestCase):
@@ -185,6 +191,23 @@ class PlatformRuntimeTests(unittest.TestCase):
         lock = load_platform_runtime_lock()
         self.assertEqual(lock["schema"], PLATFORM_RUNTIME_LOCK_SCHEMA)
         self.assertTrue(lock["runtimes"])
+        resource_ids = {
+            (
+                entry["platform"]["system"],
+                entry["platform"]["machine"],
+            ): entry["resource_bundle_ids"]
+            for entry in lock["runtimes"]
+        }
+        self.assertEqual(
+            resource_ids[("linux", "x86_64")],
+            [BF1F_RESOURCE_ID, F03E_RESOURCE_ID],
+        )
+        self.assertEqual(
+            resource_ids[("darwin", "arm64")], [F03E_RESOURCE_ID]
+        )
+        self.assertEqual(
+            resource_ids[("windows", "x86_64")], [F03E_RESOURCE_ID]
+        )
 
     def test_checked_in_lock_rejects_noncanonical_line_endings(self) -> None:
         source = (

@@ -4,6 +4,7 @@ import os
 import json
 from pathlib import Path
 import random
+import sys
 import tempfile
 import unittest
 import unicodedata
@@ -13,6 +14,9 @@ from qazmorph.stream import parse_analysis, parse_apertium_stream
 
 
 RESOURCE_DIR = os.environ.get("QAZMORPH_RESOURCE_DIR")
+BF1F_RESOURCE_ID = (
+    "bf1f31ff6e5860585b9e4134f12dcfb9d6df8030ee87b368e5a5f29eb45c1188"
+)
 
 
 def mixed_unicode_fuzz_text() -> str:
@@ -74,6 +78,24 @@ class ResourceIntegrationTests(unittest.TestCase):
         self.assertEqual(self.analyzer.backend.resource_dir, self.resource_dir.resolve())
         self.assertIsInstance(self.analyzer.backend.resource_version, str)
         self.assertTrue(self.analyzer.backend.resource_version)
+
+    def test_bf1f_resolves_the_locked_linux_runtime_as_official(self) -> None:
+        if not sys.platform.startswith("linux"):
+            self.skipTest("bf1f detached-runtime acceptance is Linux-specific")
+        if self.analyzer.backend.manifest.get("bundle_id") != BF1F_RESOURCE_ID:
+            self.skipTest("requires the sealed bf1f resource bundle")
+        provenance = self.analyzer.backend.runtime_provenance()
+        self.assertEqual(self.analyzer.backend.toolchain_origin, "platform-runtime-lock")
+        self.assertTrue(provenance["official"], provenance["non_official_reasons"])
+        self.assertEqual(provenance["non_official_reasons"], [])
+        self.assertEqual(
+            provenance["active_runtime"]["bundle_id"],
+            "39a01ea673d024b0d6080739b5bb23c76daf0f7ed7bdb95dd1157d9dce4b627e",
+        )
+        self.assertIn(
+            BF1F_RESOURCE_ID,
+            provenance["active_runtime"]["platform_lock"]["resource_bundle_ids"],
+        )
 
     def test_common_greeting_has_a_dictionary_analysis(self) -> None:
         document = self.analyzer.analyze("Сәлем")

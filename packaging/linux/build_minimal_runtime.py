@@ -348,6 +348,7 @@ def main() -> int:
         {
             "platform": {"system": "linux", "machine": "x86_64"},
             "resource_bundle_ids": [
+                "bf1f31ff6e5860585b9e4134f12dcfb9d6df8030ee87b368e5a5f29eb45c1188",
                 "f03e703d3e2a67044a7d91fd7d575b92cb4e61aa782fb67cff91b0a5ff0ebd5a"
             ],
             "bundle_id": bundle_id,

@@ -30,9 +30,12 @@ Unified native-runtime and Windows portability release.
 - Validates dictionary-generation lemmas, structured tag containers, encoded
   4,096-byte request bounds, positive integer limits, and finite timeouts before
   launching a helper.
-- Loads the sealed bf1 resource-manifest v4 bundle, including its stronger
+- Loads the sealed bf1f resource-manifest v4 bundle, including its stronger
   finiteness-v2 guesser proof and finite productive-generator exact inverse,
   while retaining f03e as the pinned analysis-only rollback.
+- Binds bf1f to the audited Ubuntu 24.04 x86-64 detached runtime after exact
+  native behavior validation. The macOS arm64 and Windows x86-64 locks remain
+  f03e-only pending their own bf1f native acceptance gates.
 - Adds noun-only high-vowel syncope, the literal `*кубок` back-harmony
   family, forbidden generic-loan probes, and root-diverse bounded ranking.
 - Adds explicit dictionary-first `productive=True` generation with strict wire

@@ -97,7 +97,8 @@ ad-hoc signing, source binding, and verification procedure is recorded in
 
 The checked-in Linux entry binds runtime
 `39a01ea673d024b0d6080739b5bb23c76daf0f7ed7bdb95dd1157d9dce4b627e`
-to f03e. Its 9,958-byte manifest has SHA-256
+to both f03e and bf1f after exact Ubuntu 24.04 x86-64 native validation. Its
+9,958-byte manifest has SHA-256
 `67da829d117d39d7de34afbc67dd649be24156fa9fab613aa318b438b9637f4b`.
 `scripts/platform_runtime_sources.linux-x86_64.lock.json` fixes the exact six
 Ubuntu binary packages and four complete Debian source sets. The public build
@@ -108,6 +109,10 @@ This target is Ubuntu 24.04 x86-64 with glibc 2.39, not generic Linux. The
 recursive audit records every host library, package version, required GLIBC/
 GLIBCXX/CXXABI symbol version, missing or escaped dependency, and the explicit
 absence of `_ssl`, `_hashlib`, `libssl`, and `libcrypto`.
+
+The macOS arm64 runtime remains locked only to f03e. A bf1f macOS binding is
+pending a real native rebuild and the complete platform acceptance gates; the
+Linux result is not used as a substitute.
 
 ## Windows Server 2022 x86-64 tested runtime
 
@@ -130,6 +135,10 @@ The closure is three executables plus 16 DLLs (51,315,200 payload bytes), all
 AMD64 PE32+; only `advapi32.dll`, `kernel32.dll`, `msvcrt.dll`, and
 `user32.dll` cross the bundle boundary. This inventory is a native-runtime
 input, not a ready-run release asset.
+
+Windows remains f03e-only. Productive bf1f is pending the real Windows build,
+PE-closure audit, bounded one-shot protocol suite, and practical behavior
+matrix; no capability is inferred from the Linux acceptance result.
 
 Windows cannot portably preserve a denying directory ACL through an ordinary
 ZIP. Runtime provenance therefore does not reinterpret Windows `READONLY`

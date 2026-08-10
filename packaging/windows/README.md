@@ -6,6 +6,10 @@ evidence.
 The bootstrap therefore records Windows Server 2022 build 10.0.20348 as the
 tested floor and does not claim Windows 10 validation.
 
+The checked-in Windows binding remains f03e-only. bf1f productive generation
+is pending a real `windows-2022` build, complete PE audit, one-shot protocol
+suite, and practical behavior matrix; it is not inferred from Linux evidence.
+
 The exact Project.JJ binary inputs and complete corresponding-source set are
 bound by `scripts/platform_runtime_sources.windows-x86_64.lock.json`.
 `build_runtime.py` validates every ZIP path, type, CRC, size, and digest;

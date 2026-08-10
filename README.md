@@ -212,6 +212,11 @@ makes a run non-official on platforms that expose it. Native assets are
 platform-specific and their release notes state the tested OS/architecture and
 signing status.
 
+The audited Ubuntu 24.04 x86-64 runtime is locked for both f03e and bf1f. The
+macOS arm64 and Windows x86-64 entries intentionally remain f03e-only: bf1f
+must not be advertised on either native target until its full platform build,
+dependency, protocol, and practical-behavior matrix has passed there.
+
 For packaged source and Python-wheel downloads, see
 [GitHub Releases](https://github.com/amir-nuriyev/KazStem/releases). The wheel
 installs the `kazstem`, `qazmorph`, and `mystem-kz` console commands. A complete
