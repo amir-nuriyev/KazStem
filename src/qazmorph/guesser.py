@@ -7,6 +7,7 @@ from dataclasses import dataclass, replace
 import math
 import os
 from pathlib import Path
+import re
 import selectors
 import subprocess
 import sys
@@ -29,6 +30,7 @@ MAX_GUESS_REQUEST_BYTES = MAX_GUESS_SURFACE_LENGTH * 4
 MAX_LOOKUP_REQUEST_BYTES = 4096
 GUESS_CACHE_CAPACITY = 8192
 CYCLE_MARKER = "[...cyclic...]"
+FAST_ANALYSIS_TAG_RE = re.compile(r"<[^<>+]+>")
 WINDOWS_STDERR_BYTE_CAP = 65_536
 WINDOWS_PIPE_READ_CHUNK = 65_536
 STEM_FINAL_ALTERNATIONS = frozenset(
@@ -333,6 +335,11 @@ class _PersistentLookupWorker:
             or candidate.endswith("+?")
         ):
             return False
+        # Every match is wholly inside one plus-delimited parser part, so this
+        # C-level regular-expression fast path is exact. Escaped-plus tags and
+        # malformed edge cases fall through to the escape-aware scan below.
+        if FAST_ANALYSIS_TAG_RE.search(candidate) is not None:
+            return True
 
         # ``parse_analysis`` first splits on unescaped ``+`` and then searches
         # each part for ``<([^<>]+)>``.  Mirror only that acceptance predicate
@@ -475,58 +482,83 @@ class _PersistentLookupWorker:
                 ) from exc
 
             request_offset = 0
-            write_selector = selectors.DefaultSelector()
-            write_selector.register(process.stdin, selectors.EVENT_WRITE, "stdin")
-            if process.stderr is not None:
-                write_selector.register(process.stderr, selectors.EVENT_READ, "stderr")
-            try:
-                while request_offset < len(request):
-                    remaining = deadline - time.monotonic()
-                    if remaining <= 0:
-                        self._abort()
-                        raise _LookupTimeout(
-                            f"HFST guesser lookup for {surface!r} timed out after "
-                            f"{timeout:.3f}s while writing the request; "
-                            "partial request discarded"
-                        )
-                    events = write_selector.select(remaining)
-                    if not events:
-                        self._abort()
-                        raise _LookupTimeout(
-                            f"HFST guesser lookup for {surface!r} timed out after "
-                            f"{timeout:.3f}s while writing the request; "
-                            "partial request discarded"
-                        )
-                    for key, _ in events:
-                        if key.data == "stderr":
-                            stderr_chunk = os.read(key.fileobj.fileno(), 65536)
-                            if stderr_chunk:
-                                self._remember_stderr(stderr_chunk)
-                            else:
-                                write_selector.unregister(key.fileobj)
-                            continue
-                        try:
-                            written = os.write(stdin_fd, request[request_offset:])
-                        except BlockingIOError:
-                            continue
-                        except (BrokenPipeError, OSError) as exc:
-                            returncode = process.poll()
-                            detail = self._stderr(process)
+
+            def write_available() -> None:
+                nonlocal request_offset
+                try:
+                    written = os.write(stdin_fd, request[request_offset:])
+                except BlockingIOError:
+                    return
+                except (BrokenPipeError, OSError) as exc:
+                    returncode = process.poll()
+                    detail = self._stderr(process)
+                    self._abort()
+                    suffix = f": {detail}" if detail else ""
+                    raise _LookupFailure(
+                        "HFST guesser lookup pipe failed"
+                        f"{f' ({returncode})' if returncode is not None else ''}"
+                        f"{suffix}"
+                    ) from exc
+                if written <= 0:
+                    self._abort()
+                    raise _LookupFailure(
+                        "HFST guesser lookup pipe accepted zero request bytes"
+                    )
+                request_offset += written
+
+            # A bounded guess request normally fits in one nonblocking pipe
+            # write.  Try it directly so the hot path does not construct and
+            # poll a second selector for an fd that is already writable.  A
+            # partial/stalled write falls through to the deadline-aware slow
+            # path, which also drains stderr and retains the same hard timeout.
+            if time.monotonic() >= deadline:
+                self._abort()
+                raise _LookupTimeout(
+                    f"HFST guesser lookup for {surface!r} timed out after "
+                    f"{timeout:.3f}s while writing the request; "
+                    "partial request discarded"
+                )
+            write_available()
+            if request_offset < len(request):
+                write_selector = selectors.DefaultSelector()
+                write_selector.register(
+                    process.stdin, selectors.EVENT_WRITE, "stdin"
+                )
+                if process.stderr is not None:
+                    write_selector.register(
+                        process.stderr, selectors.EVENT_READ, "stderr"
+                    )
+                try:
+                    while request_offset < len(request):
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0:
                             self._abort()
-                            suffix = f": {detail}" if detail else ""
-                            raise _LookupFailure(
-                                "HFST guesser lookup pipe failed"
-                                f"{f' ({returncode})' if returncode is not None else ''}"
-                                f"{suffix}"
-                            ) from exc
-                        if written <= 0:
-                            self._abort()
-                            raise _LookupFailure(
-                                "HFST guesser lookup pipe accepted zero request bytes"
+                            raise _LookupTimeout(
+                                f"HFST guesser lookup for {surface!r} timed out after "
+                                f"{timeout:.3f}s while writing the request; "
+                                "partial request discarded"
                             )
-                        request_offset += written
-            finally:
-                write_selector.close()
+                        events = write_selector.select(remaining)
+                        if not events:
+                            self._abort()
+                            raise _LookupTimeout(
+                                f"HFST guesser lookup for {surface!r} timed out after "
+                                f"{timeout:.3f}s while writing the request; "
+                                "partial request discarded"
+                            )
+                        for key, _ in events:
+                            if key.data == "stderr":
+                                stderr_chunk = os.read(
+                                    key.fileobj.fileno(), 65536
+                                )
+                                if stderr_chunk:
+                                    self._remember_stderr(stderr_chunk)
+                                else:
+                                    write_selector.unregister(key.fileobj)
+                                continue
+                            write_available()
+                finally:
+                    write_selector.close()
 
             selector = selectors.DefaultSelector()
             selector.register(process.stdout, selectors.EVENT_READ, "stdout")

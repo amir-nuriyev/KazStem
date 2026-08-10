@@ -932,6 +932,45 @@ class PersistentGuesserTests(unittest.TestCase):
         self.assertTrue(recovered.complete)
         self.assertTrue(recovered.candidates)
 
+    def test_stdin_setup_cannot_extend_absolute_deadline(self) -> None:
+        real_set_blocking = os.set_blocking
+
+        def slow_set_blocking(fd: int, blocking: bool) -> None:
+            real_set_blocking(fd, blocking)
+            time.sleep(0.06)
+
+        with mock.patch(
+            "qazmorph.guesser.os.set_blocking", side_effect=slow_set_blocking
+        ), mock.patch("qazmorph.guesser.os.write") as write, self.assertWarnsRegex(
+            RuntimeWarning, "while writing the request"
+        ):
+            outcome = self.guesser._guess_detailed("баяусөз", timeout=0.05)
+        self.assertFalse(outcome.complete)
+        self.assertEqual(outcome.candidates, ())
+        self.assertEqual(outcome.reason, "timeout")
+        write.assert_not_called()
+        self.assertIsNone(self.guesser._worker._process)
+
+    def test_partial_stdin_write_uses_deadline_slow_path_without_data_loss(self) -> None:
+        real_write = os.write
+        calls = 0
+
+        def partial_once(fd: int, data: bytes) -> int:
+            nonlocal calls
+            calls += 1
+            if calls == 1 and len(data) > 1:
+                return real_write(fd, data[:1])
+            return real_write(fd, data)
+
+        with mock.patch("qazmorph.guesser.os.write", side_effect=partial_once):
+            response = self.guesser._raw_lookup_detailed(
+                "бөлінгенсөз", timeout=1.0
+            )
+        self.assertTrue(response.complete)
+        self.assertTrue(response.lines)
+        self.assertGreaterEqual(calls, 2)
+        self.assertEqual(self.guesser.diagnostics["worker_starts"], 1)
+
     def test_response_validation_cannot_extend_absolute_deadline(self) -> None:
         self.assertTrue(self.guesser._raw_lookup("жылысөз", timeout=1.0))
         validate = self.guesser._response_protocol_problem
