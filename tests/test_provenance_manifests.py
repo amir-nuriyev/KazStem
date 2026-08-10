@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import os
@@ -7,6 +8,7 @@ from pathlib import Path
 import struct
 import stat
 import tempfile
+import types
 import unittest
 from unittest import mock
 import zipfile
@@ -49,6 +51,18 @@ windows_evidence = load_file(
 windows_probe = load_file(
     PROJECT_ROOT / "packaging" / "windows" / "probe_hfst_bounds.py",
     "test_windows_probe_hfst_bounds",
+)
+windows_lock_bytes = load_file(
+    PROJECT_ROOT / "packaging" / "windows" / "verify_git_lock_bytes.py",
+    "test_windows_verify_git_lock_bytes",
+)
+windows_host_evidence = load_file(
+    PROJECT_ROOT / "packaging" / "windows" / "write_host_evidence.py",
+    "test_windows_write_host_evidence",
+)
+windows_build_comparison = load_file(
+    PROJECT_ROOT / "packaging" / "windows" / "compare_runtime_builds.py",
+    "test_windows_compare_runtime_builds",
 )
 linux_runtime = load_file(
     PROJECT_ROOT / "packaging" / "linux" / "build_minimal_runtime.py",
@@ -421,6 +435,234 @@ class PlatformRuntimeManifestTests(unittest.TestCase):
             {"hfst-proc", "hfst-optimized-lookup", "cg-proc"},
         )
         self.assertNotIn("openssl", json.dumps(lock).casefold())
+
+        payload = path.read_bytes()
+        self.assertEqual(len(payload), 8204)
+        self.assertEqual(
+            hashlib.sha256(payload).hexdigest(),
+            "d610b9f27fcb75de1213b8ee074ed0ff39861b8efb9a7b951178ebb2966afaa3",
+        )
+        crlf = payload.replace(b"\n", b"\r\n")
+        self.assertEqual(payload.count(b"\n"), 243)
+        self.assertEqual(len(crlf), 8447)
+        self.assertEqual(
+            hashlib.sha256(crlf).hexdigest(),
+            "526becd57a714bc6d2ed69447a8f77a9b86e58d2f8abbd9b8315c84dd0741b20",
+        )
+
+    def test_platform_runtime_locks_require_canonical_lf_bytes(self) -> None:
+        attributes = (PROJECT_ROOT / ".gitattributes").read_text(encoding="utf-8")
+        self.assertIn("* text=auto eol=lf", attributes)
+        self.assertIn(
+            "include .gitattributes",
+            (PROJECT_ROOT / "MANIFEST.in").read_text(encoding="utf-8"),
+        )
+
+        windows_source = (
+            PROJECT_ROOT
+            / "scripts"
+            / "platform_runtime_sources.windows-x86_64.lock.json"
+        ).read_bytes()
+        base_lock = (
+            PROJECT_ROOT
+            / "src"
+            / "qazmorph"
+            / "platform_runtime_assets.lock.json"
+        ).read_bytes()
+        linux_source = (
+            PROJECT_ROOT
+            / "scripts"
+            / "platform_runtime_sources.linux-x86_64.lock.json"
+        ).read_bytes()
+        for label, payload, loader in (
+            ("Windows source", windows_source, platform_runtime.load_source_lock),
+            ("base", base_lock, windows_runtime.load_base_lock),
+            ("Linux source", linux_source, linux_runtime.load_source_lock),
+            (
+                "runtime manifest",
+                base_lock,
+                lambda path: platform_runtime.read_canonical_lf_json(
+                    path, label="platform runtime manifest"
+                ),
+            ),
+        ):
+            for mutation in (
+                payload.replace(b"\n", b"\r\n"),
+                payload.removesuffix(b"\n"),
+                payload + b"\n",
+                payload.removesuffix(b"\n") + b" \n",
+            ):
+                with self.subTest(label=label, mutation=len(mutation)):
+                    with tempfile.TemporaryDirectory() as temporary:
+                        path = Path(temporary) / "lock.json"
+                        path.write_bytes(mutation)
+                        with self.assertRaisesRegex(
+                            (
+                                platform_runtime.ManifestError,
+                                windows_runtime.BuildError,
+                                linux_runtime.BuildError,
+                            ),
+                            "LF-only lines",
+                        ):
+                            loader(path)
+
+    def test_git_lock_verifier_binds_worktree_bytes_and_candidate_head(self) -> None:
+        candidate = "a" * 40
+        payload = b'{"schema":"fixture"}\n'
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            lock = root / "lock.json"
+            lock.write_bytes(payload)
+            with mock.patch.object(
+                windows_lock_bytes,
+                "git_output",
+                side_effect=[(candidate + "\n").encode(), payload],
+            ) as git_output:
+                result = windows_lock_bytes.verify(
+                    root,
+                    expected_revision=candidate,
+                    paths=["lock.json"],
+                )
+            self.assertEqual(result["candidate_sha"], candidate)
+            self.assertEqual(
+                result["locks"]["lock.json"],
+                {
+                    "bytes": len(payload),
+                    "sha256": hashlib.sha256(payload).hexdigest(),
+                },
+            )
+            self.assertEqual(
+                git_output.call_args_list,
+                [
+                    mock.call(root, ["rev-parse", "HEAD"]),
+                    mock.call(
+                        root,
+                        ["show", "--no-textconv", "HEAD:lock.json"],
+                    ),
+                ],
+            )
+
+            with mock.patch.object(
+                windows_lock_bytes,
+                "git_output",
+                return_value=("c" * 40 + "\n").encode(),
+            ), self.assertRaisesRegex(
+                windows_lock_bytes.LockVerificationError,
+                "HEAD differs",
+            ):
+                windows_lock_bytes.verify(
+                    root,
+                    expected_revision=candidate,
+                    paths=["lock.json"],
+                )
+
+            lock.write_bytes(payload.replace(b"\n", b"\r\n"))
+            with mock.patch.object(
+                windows_lock_bytes,
+                "git_output",
+                side_effect=[(candidate + "\n").encode(), payload],
+            ), self.assertRaisesRegex(
+                windows_lock_bytes.LockVerificationError,
+                "worktree lock bytes differ",
+            ):
+                windows_lock_bytes.verify(
+                    root,
+                    expected_revision=candidate,
+                    paths=["lock.json"],
+                )
+
+            crlf = payload.replace(b"\n", b"\r\n")
+            with mock.patch.object(
+                windows_lock_bytes,
+                "git_output",
+                side_effect=[(candidate + "\n").encode(), crlf],
+            ), self.assertRaisesRegex(
+                windows_lock_bytes.ManifestError,
+                "LF-only lines",
+            ):
+                windows_lock_bytes.verify(
+                    root,
+                    expected_revision=candidate,
+                    paths=["lock.json"],
+                )
+
+    def test_windows_host_evidence_is_exact_and_path_free(self) -> None:
+        candidate = "b" * 40
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            args = types.SimpleNamespace(
+                root=root,
+                candidate_sha=candidate,
+                runner_label="windows-2022",
+                runner_os="Windows",
+                runner_arch="X64",
+                image_os="win22",
+                image_version="20260804.1",
+                event_name="pull_request",
+                run_id="31415926535",
+            )
+            with mock.patch.object(
+                windows_host_evidence, "git_head", return_value=candidate
+            ), mock.patch.object(
+                windows_host_evidence.platform, "system", return_value="Windows"
+            ), mock.patch.object(
+                windows_host_evidence.platform, "machine", return_value="AMD64"
+            ), mock.patch.object(
+                windows_host_evidence.platform, "release", return_value="10"
+            ), mock.patch.object(
+                windows_host_evidence.platform,
+                "version",
+                return_value="10.0.20348",
+            ), mock.patch.object(
+                windows_host_evidence.platform,
+                "python_implementation",
+                return_value="CPython",
+            ), mock.patch.object(
+                windows_host_evidence.platform,
+                "python_version",
+                return_value="3.14.3",
+            ), mock.patch.object(
+                windows_host_evidence.struct, "calcsize", return_value=8
+            ):
+                result = windows_host_evidence.build_evidence(args)
+            self.assertEqual(
+                result["candidate"],
+                {"sha": candidate, "git_head": candidate},
+            )
+            self.assertEqual(result["runner"]["requested_label"], "windows-2022")
+            self.assertEqual(result["runner"]["RUNNER_OS"], "Windows")
+            self.assertEqual(result["runner"]["RUNNER_ARCH"], "X64")
+            self.assertEqual(result["runner"]["ImageOS"], "win22")
+            self.assertEqual(result["runner"]["ImageVersion"], "20260804.1")
+            self.assertEqual(result["python"]["pointer_bits"], 64)
+            self.assertNotIn(str(root), json.dumps(result))
+            for value in windows_evidence.json_strings(result):
+                self.assertIsNone(
+                    windows_evidence.absolute_path_kind(value), value
+                )
+
+    def test_windows_build_comparison_requires_distinct_roots(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            first = Path(temporary) / "first"
+            second = Path(temporary) / "second"
+            first.mkdir()
+            second.mkdir()
+            with self.assertRaisesRegex(
+                windows_build_comparison.ComparisonError,
+                "identical or aliased",
+            ):
+                windows_build_comparison.require_distinct_roots(first, first)
+            windows_build_comparison.require_distinct_roots(first, second)
+            alias = mock.Mock()
+            other_alias = mock.Mock()
+            alias.samefile.return_value = True
+            with self.assertRaisesRegex(
+                windows_build_comparison.ComparisonError,
+                "identical or aliased",
+            ):
+                windows_build_comparison.require_distinct_roots(
+                    alias, other_alias
+                )
 
     def test_windows_zip_inventory_rejects_cross_platform_escapes_and_links(self) -> None:
         with self.assertRaisesRegex(
@@ -872,9 +1114,48 @@ class PlatformRuntimeManifestTests(unittest.TestCase):
         self.assertNotIn("contents: write", workflow)
         self.assertNotIn("pull_request_target", workflow)
         self.assertNotIn("actions/checkout@v", workflow)
+        for selected_path in (
+            ".gitattributes",
+            "MANIFEST.in",
+            "packaging/linux/build_minimal_runtime.py",
+            "packaging/windows/**",
+            "scripts/platform_runtime_sources.lock.json",
+            "scripts/platform_runtime_sources.linux-x86_64.lock.json",
+            "scripts/platform_runtime_sources.windows-x86_64.lock.json",
+            "scripts/write_platform_runtime_manifest.py",
+            "src/qazmorph/platform_runtime.py",
+            "src/qazmorph/platform_runtime_assets.lock.json",
+            "tests/test_platform_runtime.py",
+            "tests/test_provenance_manifests.py",
+        ):
+            self.assertIn(f"      - '{selected_path}'", workflow)
+        candidate_expression = (
+            "${{ github.event.pull_request.head.sha || github.sha }}"
+        )
+        self.assertGreaterEqual(workflow.count(candidate_expression), 2)
+        self.assertIn(f"ref: {candidate_expression}", workflow)
         self.assertIn("bounded-helper-options.json", workflow)
         self.assertIn("probe_hfst_bounds.py", workflow)
         self.assertIn("audit_evidence_paths.py", workflow)
+        self.assertIn("verify_git_lock_bytes.py", workflow)
+        self.assertIn("write_host_evidence.py", workflow)
+        self.assertIn("git-lock-bytes.json", workflow)
+        self.assertIn("host-evidence.json", workflow)
+        for lock_path in (
+            "scripts/platform_runtime_sources.lock.json",
+            "scripts/platform_runtime_sources.linux-x86_64.lock.json",
+            "scripts/platform_runtime_sources.windows-x86_64.lock.json",
+            "src/qazmorph/platform_runtime_assets.lock.json",
+        ):
+            self.assertIn(lock_path, workflow)
+        for contract_test in (
+            "test_platform_runtime_locks_require_canonical_lf_bytes",
+            "test_git_lock_verifier_binds_worktree_bytes_and_candidate_head",
+            "test_windows_host_evidence_is_exact_and_path_free",
+            "test_windows_build_comparison_requires_distinct_roots",
+            "test_checked_in_lock_rejects_noncanonical_line_endings",
+        ):
+            self.assertIn(contract_test, workflow)
         self.assertIn(
             "test_windows_evidence_audit_rejects_all_absolute_path_forms",
             workflow,

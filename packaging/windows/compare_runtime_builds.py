@@ -36,6 +36,11 @@ def select_runtime(parent: Path) -> Path:
     return candidates[0]
 
 
+def require_distinct_roots(first: Path, second: Path) -> None:
+    if first == second or first.samefile(second):
+        raise ComparisonError("runtime build roots are identical or aliased")
+
+
 def inventory(root: Path) -> dict[str, dict[str, object]]:
     result: dict[str, dict[str, object]] = {}
     for path in sorted(root.rglob("*"), key=lambda value: value.as_posix()):
@@ -58,8 +63,12 @@ def main() -> int:
     parser.add_argument("second", type=Path)
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
-    first = select_runtime(args.first.resolve(strict=True))
-    second = select_runtime(args.second.resolve(strict=True))
+    first_parent = args.first.resolve(strict=True)
+    second_parent = args.second.resolve(strict=True)
+    require_distinct_roots(first_parent, second_parent)
+    first = select_runtime(first_parent)
+    second = select_runtime(second_parent)
+    require_distinct_roots(first, second)
     first_inventory = inventory(first)
     second_inventory = inventory(second)
     if first.name != second.name or first_inventory != second_inventory:

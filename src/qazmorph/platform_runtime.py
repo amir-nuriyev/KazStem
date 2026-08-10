@@ -148,8 +148,16 @@ def load_platform_runtime_lock(
 ) -> dict[str, Any]:
     selected = Path(path) if path is not None else PLATFORM_RUNTIME_LOCK_PATH
     try:
-        value = json.loads(selected.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        payload = selected.read_bytes()
+        if (
+            b"\r" in payload
+            or payload != payload.rstrip(b" \t\r\n") + b"\n"
+        ):
+            raise ValueError(
+                "lock must use UTF-8, LF-only lines, and one final LF"
+            )
+        value = json.loads(payload.decode("utf-8"))
+    except (OSError, UnicodeError, ValueError, json.JSONDecodeError) as exc:
         raise PlatformRuntimeError(
             f"cannot read platform runtime lock {selected}: {exc}"
         ) from exc

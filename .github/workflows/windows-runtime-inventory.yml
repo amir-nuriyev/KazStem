@@ -6,9 +6,14 @@ on:
   workflow_dispatch:
   pull_request:
     paths:
+      - '.gitattributes'
       - '.github/workflows/windows-runtime-inventory.yml'
+      - 'MANIFEST.in'
+      - 'packaging/linux/build_minimal_runtime.py'
       - 'packaging/windows/**'
       - 'scripts/audit_pe_runtime.py'
+      - 'scripts/platform_runtime_sources.lock.json'
+      - 'scripts/platform_runtime_sources.linux-x86_64.lock.json'
       - 'scripts/platform_runtime_sources.windows-x86_64.lock.json'
       - 'scripts/write_platform_runtime_manifest.py'
       - 'src/qazmorph/backend.py'
@@ -17,6 +22,7 @@ on:
       - 'src/qazmorph/platform_runtime_assets.lock.json'
       - 'tests/test_backend.py'
       - 'tests/test_guesser.py'
+      - 'tests/test_platform_runtime.py'
       - 'tests/test_provenance_manifests.py'
 
 permissions:
@@ -27,11 +33,14 @@ jobs:
     name: Windows Server 2022 x86-64 inventory
     runs-on: windows-2022
     timeout-minutes: 45
+    env:
+      KAZSTEM_CANDIDATE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - name: Check out the exact candidate source
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Select CPython 3.14.3
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
@@ -50,6 +59,10 @@ jobs:
             tests.test_provenance_manifests.PlatformRuntimeManifestTests.test_pe_dependency_audit_proves_exact_reachable_x86_64_closure `
             tests.test_provenance_manifests.PlatformRuntimeManifestTests.test_pe_dependency_audit_rejects_missing_unreachable_and_wrong_machine_files `
             tests.test_provenance_manifests.PlatformRuntimeManifestTests.test_checked_in_windows_source_lock_is_exact_and_contains_no_openssl `
+            tests.test_provenance_manifests.PlatformRuntimeManifestTests.test_platform_runtime_locks_require_canonical_lf_bytes `
+            tests.test_provenance_manifests.PlatformRuntimeManifestTests.test_git_lock_verifier_binds_worktree_bytes_and_candidate_head `
+            tests.test_provenance_manifests.PlatformRuntimeManifestTests.test_windows_host_evidence_is_exact_and_path_free `
+            tests.test_provenance_manifests.PlatformRuntimeManifestTests.test_windows_build_comparison_requires_distinct_roots `
             tests.test_provenance_manifests.PlatformRuntimeManifestTests.test_windows_zip_inventory_rejects_cross_platform_escapes_and_links `
             tests.test_provenance_manifests.PlatformRuntimeManifestTests.test_windows_evidence_audit_decodes_json_and_scans_plain_text `
             tests.test_provenance_manifests.PlatformRuntimeManifestTests.test_windows_evidence_audit_accepts_logical_labels_and_skips_its_output `
@@ -61,6 +74,7 @@ jobs:
             tests.test_backend.ResourceManifestTests.test_windows_integrity_seal_never_accepts_a_cached_or_partial_inventory `
             tests.test_backend.ResourceManifestTests.test_windows_exe_availability_does_not_depend_on_posix_x_ok `
             tests.test_backend.ResourceManifestTests.test_windows_bound_exe_requires_successful_manifest_version_execution `
+            tests.test_platform_runtime.PlatformRuntimeTests.test_checked_in_lock_rejects_noncanonical_line_endings `
             tests.test_guesser.PersistentGuesserTests.test_windows_uses_bounded_one_shot_queries_instead_of_pipe_selectors `
             tests.test_guesser.PersistentGuesserTests.test_windows_one_shot_passes_a_plus_one_completeness_sentinel `
             tests.test_guesser.PersistentGuesserTests.test_windows_one_shot_timeout_terminates_the_helper `
@@ -81,6 +95,27 @@ jobs:
           $PSNativeCommandUseErrorActionPreference = $true
           $work = Join-Path $env:RUNNER_TEMP 'kazstem-windows-runtime'
           New-Item -ItemType Directory -Path $work | Out-Null
+          python packaging/windows/verify_git_lock_bytes.py `
+            --root . `
+            --expected-revision $env:KAZSTEM_CANDIDATE_SHA `
+            --output (Join-Path $work 'git-lock-bytes.json') `
+            scripts/platform_runtime_sources.lock.json `
+            scripts/platform_runtime_sources.linux-x86_64.lock.json `
+            scripts/platform_runtime_sources.windows-x86_64.lock.json `
+            src/qazmorph/platform_runtime_assets.lock.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python packaging/windows/write_host_evidence.py `
+            --root . `
+            --candidate-sha $env:KAZSTEM_CANDIDATE_SHA `
+            --runner-label windows-2022 `
+            --runner-os $env:RUNNER_OS `
+            --runner-arch $env:RUNNER_ARCH `
+            --image-os $env:ImageOS `
+            --image-version $env:ImageVersion `
+            --event-name '${{ github.event_name }}' `
+            --run-id '${{ github.run_id }}' `
+            --output (Join-Path $work 'host-evidence.json')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python packaging/windows/fetch_locked_inputs.py `
             --lock scripts/platform_runtime_sources.windows-x86_64.lock.json `
             --archives (Join-Path $work 'inputs/binaries') `
@@ -139,6 +174,8 @@ jobs:
           $evidence = Join-Path $work 'evidence'
           New-Item -ItemType Directory -Path $evidence | Out-Null
           Copy-Item (Join-Path $work 'locked-downloads.txt') $evidence
+          Copy-Item (Join-Path $work 'git-lock-bytes.json') $evidence
+          Copy-Item (Join-Path $work 'host-evidence.json') $evidence
           Copy-Item (Join-Path $work 'bounded-helper-options.json') $evidence
           Copy-Item (Join-Path $work 'runtime-reproducibility.json') $evidence
           Copy-Item (Join-Path $work 'build-a/runtime-build.json') (Join-Path $evidence 'runtime-build-a.json')

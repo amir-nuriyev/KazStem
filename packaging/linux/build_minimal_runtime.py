@@ -86,6 +86,24 @@ def canonical_hash(value: Any) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+def read_canonical_lf_json(path: Path, *, label: str) -> Any:
+    try:
+        payload = path.read_bytes()
+    except OSError as exc:
+        raise BuildError(f"cannot read {label} {path}: {exc}") from exc
+    if (
+        b"\r" in payload
+        or payload != payload.rstrip(b" \t\r\n") + b"\n"
+    ):
+        raise BuildError(
+            f"{label} must use UTF-8, LF-only lines, and one final LF: {path}"
+        )
+    try:
+        return json.loads(payload.decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise BuildError(f"cannot read {label} {path}: {exc}") from exc
+
+
 def verify_record_set(
     root: Path, expected: list[dict[str, Any]], *, label: str
 ) -> list[dict[str, Any]]:
@@ -105,7 +123,7 @@ def verify_record_set(
 
 
 def load_source_lock(path: Path) -> dict[str, Any]:
-    value = json.loads(path.read_text(encoding="utf-8"))
+    value = read_canonical_lf_json(path, label="Linux runtime source lock")
     if not isinstance(value, dict) or value.get("schema") != LOCK_SCHEMA:
         raise BuildError(f"invalid Linux runtime source lock: {path}")
     required = {
@@ -315,7 +333,10 @@ def main() -> int:
         shutil.rmtree(final)
     staging.rename(final)
 
-    base_lock = json.loads(args.base_lock.resolve(strict=True).read_text(encoding="utf-8"))
+    base_lock = read_canonical_lf_json(
+        args.base_lock.resolve(strict=True),
+        label="base platform runtime lock",
+    )
     if base_lock.get("schema") != "kazstem-platform-runtime-lock-v1":
         raise BuildError("invalid base platform runtime lock")
     runtimes = [

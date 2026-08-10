@@ -24,6 +24,7 @@ from write_platform_runtime_manifest import (  # noqa: E402
     build_manifest,
     file_record,
     load_source_lock,
+    read_canonical_lf_json,
 )
 
 
@@ -139,8 +140,10 @@ def archive_payload(
 
 def load_base_lock(path: Path) -> dict[str, Any]:
     try:
-        lock = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        lock = read_canonical_lf_json(
+            path, label="base platform runtime lock"
+        )
+    except ManifestError as exc:
         raise BuildError(f"invalid base platform runtime lock {path}: {exc}") from exc
     if (
         not isinstance(lock, dict)

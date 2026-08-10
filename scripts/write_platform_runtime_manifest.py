@@ -90,11 +90,30 @@ def safe_relative_path(value: object) -> str | None:
     return value
 
 
-def load_source_lock(path: Path) -> dict[str, Any]:
+def read_canonical_lf_json(path: Path, *, label: str) -> Any:
+    """Decode JSON only when its source bytes use the release LF contract."""
+
     try:
-        lock = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        raise ManifestError(f"cannot read platform runtime source lock {path}: {exc}") from exc
+        payload = path.read_bytes()
+    except OSError as exc:
+        raise ManifestError(f"cannot read {label} {path}: {exc}") from exc
+    if (
+        b"\r" in payload
+        or payload != payload.rstrip(b" \t\r\n") + b"\n"
+    ):
+        raise ManifestError(
+            f"{label} must use UTF-8, LF-only lines, and one final LF: {path}"
+        )
+    try:
+        return json.loads(payload.decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise ManifestError(f"cannot read {label} {path}: {exc}") from exc
+
+
+def load_source_lock(path: Path) -> dict[str, Any]:
+    lock = read_canonical_lf_json(
+        path, label="platform runtime source lock"
+    )
     if not isinstance(lock, dict) or lock.get("schema") != LOCK_SCHEMA:
         raise ManifestError(f"unsupported platform runtime source lock schema: {path}")
     fields = set(lock)
@@ -689,10 +708,9 @@ def main() -> int:
         source_lock_path,
     )
     if args.verify:
-        try:
-            actual = json.loads(output.read_text(encoding="utf-8"))
-        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-            raise ManifestError(f"cannot read platform runtime manifest {output}: {exc}") from exc
+        actual = read_canonical_lf_json(
+            output, label="platform runtime manifest"
+        )
         if actual != expected:
             raise ManifestError(f"platform runtime manifest verification failed: {output}")
     else:

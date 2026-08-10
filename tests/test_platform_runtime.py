@@ -186,6 +186,26 @@ class PlatformRuntimeTests(unittest.TestCase):
         self.assertEqual(lock["schema"], PLATFORM_RUNTIME_LOCK_SCHEMA)
         self.assertTrue(lock["runtimes"])
 
+    def test_checked_in_lock_rejects_noncanonical_line_endings(self) -> None:
+        source = (
+            Path(__file__).resolve().parents[1]
+            / "src/qazmorph/platform_runtime_assets.lock.json"
+        )
+        payload = source.read_bytes()
+        for mutation in (
+            payload.replace(b"\n", b"\r\n"),
+            payload.removesuffix(b"\n"),
+            payload + b"\n",
+            payload.removesuffix(b"\n") + b" \n",
+        ):
+            with self.subTest(
+                bytes=len(mutation)
+            ), tempfile.TemporaryDirectory() as temporary:
+                selected = Path(temporary) / "platform_runtime_assets.lock.json"
+                selected.write_bytes(mutation)
+                with self.assertRaisesRegex(PlatformRuntimeError, "LF-only lines"):
+                    load_platform_runtime_lock(selected)
+
 
 if __name__ == "__main__":
     unittest.main()

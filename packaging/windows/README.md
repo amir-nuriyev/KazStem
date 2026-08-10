@@ -31,12 +31,15 @@ Run the private inventory workflow first:
 ```
 
 The workflow has `contents: read`, persists no checkout credentials, and can
-only upload a seven-day Actions artifact. It downloads locked inputs, runs
-source-side path/PE/seal tests, builds in two distinct roots, requires exact
-runtime and proposed-lock equality, rejects absolute runner paths in all
-textual evidence, and uploads the candidate runtime plus proposed lock for
-review. It never
-creates a tag or GitHub release.
+only upload a seven-day Actions artifact. It checks out the exact pull-request
+head, requires every platform source/runtime lock to be LF-only and byte-equal
+to `git show HEAD:path`, and records the candidate SHA, hosted-image identity,
+Windows host details, and CPython identity without machine-local paths. It then
+downloads locked inputs, runs source-side path/PE/seal tests, builds in two
+distinct non-aliased roots, requires exact runtime and proposed-lock equality,
+rejects absolute runner paths in all textual evidence, and uploads the
+candidate runtime plus proposed lock for review. It never creates a tag or
+GitHub release.
 
 After the Windows entry is checked in, rebuild the one canonical 0.2.3 wheel
 and sdist, then rebuild Mac, Linux, and Windows from that same source identity.
