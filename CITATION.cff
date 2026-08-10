@@ -1,0 +1,24 @@
+cff-version: 1.2.0
+message: "If you use KazStem in research, please cite this software."
+title: "KazStem: an ambiguity-preserving Kazakh morphological analyzer and generator"
+type: software
+authors:
+  - family-names: Nuriyev
+    given-names: Amir
+version: 0.2.0
+date-released: 2026-08-10
+repository-code: "https://github.com/amir-nuriyev/KazStem"
+url: "https://github.com/amir-nuriyev/KazStem"
+license: GPL-3.0-or-later
+keywords:
+  - Kazakh
+  - morphology
+  - morphological analysis
+  - lemmatization
+  - finite-state transducers
+  - natural language processing
+abstract: >-
+  KazStem is an ambiguity-preserving morphological analyzer and generator for
+  Kazakh. It combines finite-state morphology, bounded productive analysis,
+  optional Constraint Grammar disambiguation, and candidate-constrained neural
+  ranking behind a MyStem-like command-line interface and a typed Python API.

@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kazstem"
+version = "0.2.0"
+description = "Ambiguity-preserving Kazakh morphological analyzer and generator with a MyStem-like CLI"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "GPL-3.0-or-later"
+license-files = ["LICENSE", "THIRD_PARTY.md"]
+authors = [{ name = "Amir Nuriyev" }]
+keywords = ["kazakh", "morphology", "lemmatization", "nlp", "fst", "mystem"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Natural Language :: Other",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Topic :: Text Processing :: Linguistic",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/amir-nuriyev/KazStem"
+Documentation = "https://github.com/amir-nuriyev/KazStem#readme"
+Repository = "https://github.com/amir-nuriyev/KazStem"
+Issues = "https://github.com/amir-nuriyev/KazStem/issues"
+Changelog = "https://github.com/amir-nuriyev/KazStem/releases"
+
+[project.scripts]
+kazstem = "qazmorph.cli:main"
+qazmorph = "qazmorph.cli:main"
+mystem-kz = "qazmorph.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]

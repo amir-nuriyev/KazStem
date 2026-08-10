@@ -1,0 +1,26 @@
+{
+  "title": "KazStem: an ambiguity-preserving Kazakh morphological analyzer and generator",
+  "description": "KazStem combines finite-state Kazakh morphology, bounded productive OOV analysis, optional Constraint Grammar disambiguation, and candidate-constrained neural ranking behind a MyStem-like CLI and typed Python API.",
+  "upload_type": "software",
+  "creators": [
+    {
+      "name": "Nuriyev, Amir"
+    }
+  ],
+  "license": "GPL-3.0-or-later",
+  "access_right": "open",
+  "keywords": [
+    "Kazakh",
+    "morphology",
+    "lemmatization",
+    "finite-state transducers",
+    "natural language processing"
+  ],
+  "related_identifiers": [
+    {
+      "identifier": "https://github.com/amir-nuriyev/KazStem",
+      "relation": "isSupplementTo",
+      "scheme": "url"
+    }
+  ]
+}

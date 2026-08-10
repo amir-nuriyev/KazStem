@@ -1,0 +1,72 @@
+{
+  "schema": "qazmorph-toolchain-archive-lock-v1",
+  "distribution": "Ubuntu 24.04 (noble)",
+  "architecture": "amd64",
+  "required_commands": [
+    "cg-comp",
+    "cg-proc",
+    "hfst-compose-intersect",
+    "hfst-fst2fst",
+    "hfst-fst2strings",
+    "hfst-fst2txt",
+    "hfst-invert",
+    "hfst-lexc",
+    "hfst-lookup",
+    "hfst-minimise",
+    "hfst-optimized-lookup",
+    "hfst-proc",
+    "hfst-regexp2fst",
+    "hfst-subtract",
+    "hfst-twolc"
+  ],
+  "packages": [
+    {
+      "architecture": "amd64",
+      "bytes": 166006,
+      "filename": "cg3_1.4.6-1build2_amd64.deb",
+      "package": "cg3",
+      "sha256": "1cbbe62b20f96ad48ef29004beea231577e6e0cdede760de774447ad207fe4c6",
+      "version": "1.4.6-1build2"
+    },
+    {
+      "architecture": "amd64",
+      "bytes": 549092,
+      "filename": "hfst_3.16.0-5build4_amd64.deb",
+      "package": "hfst",
+      "sha256": "6d32eaef2355c81f5a226a73b79bc168c47ebb5f50a4e4e8f554f4ee60b04cd7",
+      "version": "3.16.0-5build4"
+    },
+    {
+      "architecture": "amd64",
+      "bytes": 345116,
+      "filename": "libcg3-1_1.4.6-1build2_amd64.deb",
+      "package": "libcg3-1",
+      "sha256": "7da58db0c64b9c9f9a9741179db0ff53a30b7755bea4d402a130d0219878afa5",
+      "version": "1.4.6-1build2"
+    },
+    {
+      "architecture": "amd64",
+      "bytes": 112052,
+      "filename": "libfoma0t64_1%3a0.10.0+s311-1.2build2_amd64.deb",
+      "package": "libfoma0t64",
+      "sha256": "99e3be6c2292d3b495e20d136c2f8b9658235b016dd0b239a26d01fe2a1db1d7",
+      "version": "1:0.10.0+s311-1.2build2"
+    },
+    {
+      "architecture": "amd64",
+      "bytes": 2196570,
+      "filename": "libfst22_1.7.9-5build1_amd64.deb",
+      "package": "libfst22",
+      "sha256": "7316d432472a5405767e131742f2165832a14ce5fded50f4fb21d0f6c97b10a3",
+      "version": "1.7.9-5build1"
+    },
+    {
+      "architecture": "amd64",
+      "bytes": 1695820,
+      "filename": "libhfst55_3.16.0-5build4_amd64.deb",
+      "package": "libhfst55",
+      "sha256": "b037a2d9c98295705635659ffb9711e19101662d1c2397f32d51593fcde8c050",
+      "version": "3.16.0-5build4"
+    }
+  ]
+}

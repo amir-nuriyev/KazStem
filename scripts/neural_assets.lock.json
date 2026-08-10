@@ -1,0 +1,85 @@
+{
+  "schema": "qazmorph-neural-lock-v1",
+  "python": "3.12",
+  "installer": {
+    "uv_sha256": "c9f7ca00a5e1c4f2a6dd96db91097bec5b76a53a483818e8ee746e9c7440547a",
+    "uv_version": "uv 0.11.6 (x86_64-unknown-linux-gnu)"
+  },
+  "stanza": {
+    "language": "kk",
+    "processors": "tokenize,pos,lemma",
+    "version": "1.14.0"
+  },
+  "venv_packages": {
+    "anyio": "4.14.2",
+    "certifi": "2026.7.22",
+    "click": "8.4.2",
+    "colorama": "0.4.6",
+    "emoji": "2.15.0",
+    "filelock": "3.32.2",
+    "fsspec": "2026.7.0",
+    "h11": "0.16.0",
+    "hf-xet": "1.6.0",
+    "httpcore": "1.0.9",
+    "httpx": "0.28.1",
+    "huggingface-hub": "1.27.0",
+    "idna": "3.18",
+    "packaging": "26.3",
+    "platformdirs": "4.11.1",
+    "PyYAML": "6.0.3",
+    "regex": "2026.7.19",
+    "setuptools": "80.9.0",
+    "stanza": "1.14.0",
+    "termcolor": "3.3.0",
+    "tqdm": "4.70.0",
+    "typing-extensions": "4.16.0",
+    "udapi": "0.5.2",
+    "udtools": "0.2.8",
+    "wheel": "0.45.1"
+  },
+  "host_packages": {
+    "networkx": "3.6.1",
+    "numpy": "2.4.4",
+    "protobuf": "6.33.6",
+    "requests": "2.31.0",
+    "torch": "2.11.0"
+  },
+  "host_runtime": {
+    "cuda": "13.0",
+    "torch": "2.11.0+cu130"
+  },
+  "model_files": {
+    "kk/backward_charlm/oscar.pt": {
+      "bytes": 19637787,
+      "sha256": "7a9d868a678c624fb5d5972aa8d34e22e360bcd2183ae5aa924a69078cc61dfa"
+    },
+    "kk/forward_charlm/oscar.pt": {
+      "bytes": 19637786,
+      "sha256": "512b8698ce69066b7c01ed056d2bbeb6a26d61fe8310c7eeef6be978b31f51e2"
+    },
+    "kk/lemma/ktb_nocharlm.pt": {
+      "bytes": 2027409,
+      "sha256": "f74a8f4efb5e44dbaf1a4927f718013546946e9eeb5fd794af32a304a959a3f3"
+    },
+    "kk/mwt/ktb.pt": {
+      "bytes": 552961,
+      "sha256": "391f6998e7000c7ad1c8faffb5d461941f8f69559a4a0bfcac7f3f2d3825d7a5"
+    },
+    "kk/pos/ktb_charlm.pt": {
+      "bytes": 35045357,
+      "sha256": "d84790a02671880c4cba6449fd4e71ec5200309a4cf973dc8119d2bf657b73c3"
+    },
+    "kk/pretrain/fasttext157.pt": {
+      "bytes": 185166299,
+      "sha256": "bf0ff72ec12e88b6ba36b786aee33b058683f3c790c8c8adbccbf738f808d3f4"
+    },
+    "kk/tokenize/ktb.pt": {
+      "bytes": 633237,
+      "sha256": "34f73cee9b595273522151499403d0e34dcf5112f5d00cb9a9c055ae39234499"
+    },
+    "resources.json": {
+      "bytes": 457371,
+      "sha256": "4e41c1df152146fa26ed0c006a08feea7a60bb3414bb6d57dbda24ad2e3cb99c"
+    }
+  }
+}

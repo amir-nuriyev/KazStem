@@ -1,0 +1,41 @@
+name: Publish an audited GitHub release to PyPI
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing GitHub release tag whose audited assets will be published
+        required: true
+        default: v0.2.0
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Publish exact release assets
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Download the existing audited release artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir dist
+          gh release download "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --pattern 'kazstem-*.whl' \
+            --pattern 'kazstem-*.tar.gz' \
+            --dir dist
+          test "$(find dist -maxdepth 1 -type f -name 'kazstem-*.whl' | wc -l)" -eq 1
+          test "$(find dist -maxdepth 1 -type f -name 'kazstem-*.tar.gz' | wc -l)" -eq 1
+
+      - name: Publish with PyPI trusted publishing
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/

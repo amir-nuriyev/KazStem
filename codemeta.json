@@ -1,0 +1,25 @@
+{
+  "@context": "https://doi.org/10.5063/schema/codemeta-2.0",
+  "@type": "SoftwareSourceCode",
+  "name": "KazStem",
+  "description": "Ambiguity-preserving Kazakh morphological analyzer and generator with a MyStem-like CLI.",
+  "version": "0.2.0",
+  "datePublished": "2026-08-10",
+  "codeRepository": "https://github.com/amir-nuriyev/KazStem",
+  "issueTracker": "https://github.com/amir-nuriyev/KazStem/issues",
+  "license": "https://spdx.org/licenses/GPL-3.0-or-later.html",
+  "programmingLanguage": "Python",
+  "runtimePlatform": "Python 3.10 or later",
+  "keywords": [
+    "Kazakh",
+    "morphology",
+    "lemmatization",
+    "finite-state transducers",
+    "natural language processing"
+  ],
+  "author": {
+    "@type": "Person",
+    "givenName": "Amir",
+    "familyName": "Nuriyev"
+  }
+}

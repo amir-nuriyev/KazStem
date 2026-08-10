@@ -1,0 +1,7 @@
+KazStem
+Copyright (C) 2026 Amir Nuriyev and contributors.
+
+KazStem is distributed under GPL-3.0-or-later. Third-party components and data
+have their own terms; see THIRD_PARTY.md. No corpus, neural-model weights,
+compiled Kazakh FSTs, or platform-native HFST/CG binaries are included in the
+source distribution unless a release asset explicitly says otherwise.
