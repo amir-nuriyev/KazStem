@@ -224,6 +224,19 @@ class PlatformRuntimeManifestTests(unittest.TestCase):
             {record["name"] for record in lock["required_commands"]},
             {"hfst-proc", "hfst-optimized-lookup", "cg-proc"},
         )
+        transitive = {
+            record["component"]: record["sha256"]
+            for record in lock["corresponding_sources"]
+        }
+        self.assertEqual(
+            {name: transitive[name] for name in ("ICU", "ncurses", "SQLite", "zlib")},
+            {
+                "ICU": "3a2e7a47604ba702f345878308e6fefeca612ee895cf4a5f222e7955fabfe0c0",
+                "ncurses": "4c8e657b439659396c2935d70a9259220097c4a3b5d520fa3409ef5e1f9caae2",
+                "SQLite": "81f5be397049b0cae1b167f2225af7646fc0f82e4a9b3c48c9ea3a533e21d77a",
+                "zlib": "bb329a0a2cd0274d05519d61c667c062e06990d72e125ee2dfa8de64f0119d16",
+            },
+        )
 
     def test_runtime_inventory_records_symlink_and_regular_file_separately(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

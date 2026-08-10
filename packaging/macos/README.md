@@ -29,14 +29,21 @@ unused generic `hfst-lookup`; analysis uses `hfst-proc`, OOV and generation use
 `hfst-optimized-lookup`, and contextual mode uses `cg-proc`. Recursively retain
 only the dylibs reached by those three executables.
 
-On copied Mach-O files, run `/usr/bin/strip -S -x`, then
-`codesign --force --sign - --timestamp=none` and require
-`codesign --verify --strict`. Do not post-process the PyInstaller launcher: it
-contains an appended CArchive and its symbol audit has no removable local
-symbols. Re-sign the complete copied `Python.framework` after its binary is
-stripped. Regenerate the detached runtime manifest from the exact source lock,
-rename it to its content-addressed bundle ID, update the public runtime lock,
-rebuild the wheel, and repeat the frozen build.
+For each copied Mach-O, compare the untouched upstream byte size with a copy
+processed by `/usr/bin/strip -S -x` and then
+`codesign --force --sign - --timestamp=none`. Retain a transformed copy only
+when it is strictly smaller and every behavior, dependency, minimum-OS, and
+strict-signature gate passes. In the reviewed native runtime this transforms
+only `libfst.27.dylib`; the other files retain their exact Project.JJ archive
+bytes and upstream ad-hoc/linker signatures. The transformed library has a new
+local ad-hoc signature and is fully rebound by the regenerated runtime
+manifest. Do not post-process the PyInstaller launcher: it contains an appended
+CArchive and its symbol audit has no removable local symbols. PyInstaller's
+copied Python Mach-O files are independently stripped and ad-hoc signed; re-sign
+the complete copied `Python.framework` after its binary is stripped. Regenerate
+the detached runtime manifest from the exact source lock, rename it to its
+content-addressed bundle ID, update the public runtime lock, rebuild the wheel,
+and repeat the frozen build.
 
 Seal the resource/runtime directories read-only. Add only notices, licenses,
 the module/native inclusion ledger, and an exact name/size/SHA-256/URL binding
