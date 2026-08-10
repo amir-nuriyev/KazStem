@@ -454,14 +454,14 @@ def format_xml(
             weights=weights,
         ):
             attrs = [f"lex={_xml_attribute(row['lex'], field='analysis lex')}"]
+            if "wt" in row:
+                attrs.append(f"wt={_xml_attribute(row['wt'], field='analysis wt')}")
             if "qual" in row:
                 attrs.append(
                     f"qual={_xml_attribute(row['qual'], field='analysis qual')}"
                 )
             if "gr" in row:
                 attrs.append(f"gr={_xml_attribute(row['gr'], field='analysis gr')}")
-            if "wt" in row:
-                attrs.append(f"wt={_xml_attribute(row['wt'], field='analysis wt')}")
             chunks.append("<ana " + " ".join(attrs) + " />")
         # MyStem emits all zero-width analysis elements before the surface
         # text in ``w``. This ordering is observable in XML's mixed-content

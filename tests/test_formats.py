@@ -549,6 +549,16 @@ class XmlFormatterTests(unittest.TestCase):
         )
         self.assertIn('qual="bastard"', format_xml(document))
 
+    def test_xml_uses_mystem_analysis_attribute_order(self) -> None:
+        guessed = make_analysis("foo", "NOUN", guessed=True, score=0.4)
+        document = Document(
+            "foo", [Token("foo", 0, 3, "word", [guessed])], "lattice", "test"
+        )
+        self.assertIn(
+            '<ana lex="foo" wt="0.4" qual="bastard" gr="NOUN" />foo',
+            format_xml(document, weights=True),
+        )
+
     def test_xml_can_omit_nonlexical_input(self) -> None:
         output = format_xml(sample_document(), copy_input=False)
         self.assertNotIn(" !", output)

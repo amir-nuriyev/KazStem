@@ -17,8 +17,8 @@ not inferred only from examples. The audited versioned archive is
 the executable reports `Version 3.1`. Fixed probes confirm that lexical JSON
 objects place `analysis` before `text`, analysis fields use `lex`, optional
 `wt`, optional `qual`, then optional `gr`, and XML places every `<ana />`
-before the surface text inside `<w>`. KazStem follows those deterministic
-envelope orders.
+before the surface text inside `<w>` with the same deterministic analysis
+attribute order. KazStem follows those envelope orders.
 
 The audit does not turn the two programs into byte-identical engines. Native
 MyStem may synthesize a final input-line newline, uses Russian grammemes and
