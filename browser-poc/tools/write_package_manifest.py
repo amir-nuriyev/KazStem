@@ -27,13 +27,14 @@ def main() -> int:
             "sha256": hashlib.sha256(content).hexdigest(),
         }
     manifest = {
-        "schema": "kazstem.browser-isolated-package.v1",
+        "schema": "kazstem.browser-isolated-package.v2",
         "base_project_version": "0.2.1",
         "base_project_commit": "97cf865a0cef20ee78be1610bbe76ec6c7e52006",
         "branch": "codex/browser-pages-poc",
-        "freeze_time_publication_state": {
-            "deployed": False,
-            "pushed": False,
+        "package_build_state": {
+            "distribution_scope": "public",
+            "pages_status": "published",
+            "repository_visibility": "public",
         },
         "self_excluded": output.relative_to(root).as_posix(),
         "file_count": len(files),

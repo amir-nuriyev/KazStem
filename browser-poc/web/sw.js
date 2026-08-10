@@ -1,4 +1,4 @@
-const CACHE = "kazstem-browser-d0df783b4a51-v4";
+const CACHE = "kazstem-browser-d0df783b4a51-v5";
 const CORE = [
   "./", "./index.html", "./styles.css", "./app.js", "./worker.js", "./csr.js", "./analysis.js", "./casefold.js", "./formats.js",
   "./manifest.webmanifest", "./icons/icon.svg", "./resources/resource-manifest.json", "./resources/probe-ledger-summary.json", "./resources/analyzer.kzc",

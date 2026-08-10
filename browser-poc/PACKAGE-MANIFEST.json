@@ -5,8 +5,8 @@
   "file_count": 48,
   "files": {
     "README.md": {
-      "bytes": 8877,
-      "sha256": "6c30af54e9f55b9a84594d6efe25ae9f0c051a71d7bcece052c58ed706da5480"
+      "bytes": 9051,
+      "sha256": "657bf30ac3a445eeee9d4812afe5c0932c36fdd4931db143ac06415bf9ba6ab4"
     },
     "RESEARCH.md": {
       "bytes": 2888,
@@ -42,15 +42,15 @@
     },
     "reports/pages-stage-manifest.json": {
       "bytes": 3811,
-      "sha256": "6cdac5666e2a20ac91e3673a2bf4d409018ddaf8c7ee61990750c8c17c3f1d85"
+      "sha256": "598848560ecc175d8a780db288ac666d1a154de06ef309595beb0b6b38636fb2"
     },
     "reports/runtime-probe.json": {
       "bytes": 9472,
       "sha256": "67871a2aeae628d8c773b65a3eab43f7860bc08e08079c068d868e32f049650e"
     },
     "reports/stage-package-integrity.json": {
-      "bytes": 92,
-      "sha256": "9d5cae88c747000c5e5e18a7398dcbae8b8a183923ef93b4264757f7980778df"
+      "bytes": 93,
+      "sha256": "4364aa6fa3e21445df123900c71ba3351f328511b6c319f588ea23eb9b11ca5d"
     },
     "reports/ui-bindings.json": {
       "bytes": 90,
@@ -69,8 +69,8 @@
       "sha256": "680d685f9680885da9516963513d9f0661f9f75c0b535e54fb661a3eeaed6ade"
     },
     "tests/stage_package_integrity.py": {
-      "bytes": 3575,
-      "sha256": "f04173373a3f73e3bf9fc3f0382134391d148f0e026d0a937c59ea482e9d6f10"
+      "bytes": 6805,
+      "sha256": "e2906708ee1b04847c786eb8c2a7f6ae39442411c1820a87ae0320f3b9759d61"
     },
     "tests/ui_bindings.mjs": {
       "bytes": 3359,
@@ -97,16 +97,16 @@
       "sha256": "e454f40dc778e9b9e080e6d3fccaa4d2c9bacd334459aadcbc38a3aeade3683c"
     },
     "tools/stage_pages.py": {
-      "bytes": 5813,
-      "sha256": "b2d4010900045b3d5e1c1aac198c43a4eba4fdefbd8a719b9cd3d3d8f7740b31"
+      "bytes": 10009,
+      "sha256": "5379d0c3a784c26e01b0939b043d483147964579f6aa2aeaf03ad5ecd52a0d2c"
     },
     "tools/summarize_proofs.py": {
       "bytes": 2848,
       "sha256": "77ef04cebcf4336472b6658c09721191006d4a11bcaba5c9a0b1d96a7de90f84"
     },
     "tools/write_package_manifest.py": {
-      "bytes": 1624,
-      "sha256": "f5aedb5fe9f301819fdb7f32498d5b14817f9f6abcce5b2ac7329102ae91dd49"
+      "bytes": 1686,
+      "sha256": "231ee08ffaebdf7e27cd09224e9e37b44d1d2a851fdce7da0b8012219746f7ac"
     },
     "web/analysis.js": {
       "bytes": 9235,
@@ -142,19 +142,19 @@
     },
     "web/legal/SOURCE-ARCHIVE.json": {
       "bytes": 215,
-      "sha256": "b17bebcb362913832dc5b57d3be3e3d291e6bbbec9c87004a70ce4d24fb488e1"
+      "sha256": "3998489a8857d2ee6c0263aaad0444bf2c6fb22064c3849650413a80a1ce65fe"
     },
     "web/legal/SOURCE.md": {
       "bytes": 2756,
       "sha256": "359752644e63359a6d89a4bed39b0bf9181b0eb11b6f93b303399f2de90b327c"
     },
     "web/legal/THIRD_PARTY.md": {
-      "bytes": 6281,
-      "sha256": "b00ced3453e7c5c0875577dd94923391fb030f4ac33b723a55556e01f5bf1638"
+      "bytes": 6436,
+      "sha256": "66162a018c61da5cfbb08b5589806b826408b685726e87fb7e3e3854c1b77380"
     },
     "web/legal/kazstem-browser-corresponding-source-0.2.1.tar.gz": {
-      "bytes": 9499007,
-      "sha256": "9d054a121d50f187bcc14f93b84cf6dd2e9dea3a49046fa75c422bd069d7bafb"
+      "bytes": 9501020,
+      "sha256": "05774450693711d4d54afdcb4eb8631fadc11c3355a1d5fde34a3a37ebe31926"
     },
     "web/manifest.webmanifest": {
       "bytes": 406,
@@ -186,7 +186,7 @@
     },
     "web/sw.js": {
       "bytes": 1442,
-      "sha256": "5c2d4a0f3b8b2df06253dcbe24592d57bdbd6fc8b583896a92b6cdac45f282e0"
+      "sha256": "b22a11640e84b25c45ffd88214e81edcd746960bb590d1111a50af4d1c21c8a5"
     },
     "web/worker.js": {
       "bytes": 14405,
@@ -197,11 +197,12 @@
       "sha256": "2f63efc71ac365f101ad89d9f0fde4c52143483c5f8e024f76a8887155f314e5"
     }
   },
-  "freeze_time_publication_state": {
-    "deployed": false,
-    "pushed": false
+  "package_build_state": {
+    "distribution_scope": "public",
+    "pages_status": "published",
+    "repository_visibility": "public"
   },
-  "schema": "kazstem.browser-isolated-package.v1",
+  "schema": "kazstem.browser-isolated-package.v2",
   "self_excluded": "PACKAGE-MANIFEST.json",
-  "total_bytes": 11686699
+  "total_bytes": 11696530
 }
