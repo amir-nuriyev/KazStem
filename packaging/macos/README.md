@@ -40,10 +40,14 @@ local ad-hoc signature and is fully rebound by the regenerated runtime
 manifest. Do not post-process the PyInstaller launcher: it contains an appended
 CArchive and its symbol audit has no removable local symbols. PyInstaller's
 copied Python Mach-O files are independently stripped and ad-hoc signed; re-sign
-the complete copied `Python.framework` after its binary is stripped. Regenerate
-the detached runtime manifest from the exact source lock, rename it to its
-content-addressed bundle ID, update the public runtime lock, rebuild the wheel,
-and repeat the frozen build.
+the complete copied `Python.framework` after its binary is stripped. Set every
+native-runtime executable/symlink to its final read-only executable mode and
+every library to its final read-only data mode *before* regenerating the
+detached runtime manifest from the exact source lock. Keep only the runtime
+root temporarily owner-writable for the manifest's atomic replacement; then
+seal that directory too and require `--verify` to reproduce the manifest from
+the fully sealed tree. Rename it to its content-addressed bundle ID, update the
+public runtime lock, rebuild the wheel, and repeat the frozen build.
 
 Seal the resource/runtime directories read-only. Add only notices, licenses,
 the module/native inclusion ledger, and an exact name/size/SHA-256/URL binding

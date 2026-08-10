@@ -9,10 +9,10 @@
       "resource_bundle_ids": [
         "f03e703d3e2a67044a7d91fd7d575b92cb4e61aa782fb67cff91b0a5ff0ebd5a"
       ],
-      "bundle_id": "498689289580544442041c23c7d7f997927eb0e63034863dbe2a9faf5731316b",
+      "bundle_id": "5341c48bfd1ef57e3976d0849d0ec6d61e2d45ff8d4643b07176fbc6eddf8e57",
       "manifest": {
         "bytes": 10679,
-        "sha256": "b6beff9f0d8b5a988ce72b6b16a788c5610083a8d5624732a4b6b99be71ba12a"
+        "sha256": "bb84ef3fc227fd24c78e4b8f25caa26f365a5f9497aaa76a7ec2d5d49836ee72"
       }
     }
   ]
