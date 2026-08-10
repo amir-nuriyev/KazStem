@@ -135,6 +135,11 @@ productive HFST guesser consequently uses a bounded one-shot child on Windows,
 with the same input, output, line, byte, timeout, protocol-correlation, and
 cleanup gates. POSIX builds retain the faster persistent worker.
 
+Windows ZIP extraction does not supply a portable POSIX executable bit, and
+`os.access(path, os.X_OK)` is therefore evidence only. Helper availability is
+proved by a regular `.exe` entry, exact manifest/hash identity, and successful
+native version execution before the helper is accepted.
+
 The ready-run ZIP is unsigned: no Authenticode publisher signature, timestamp,
 or SmartScreen reputation is claimed. The release notes must say this plainly;
 users may see an operating-system warning. Signing a later asset changes its

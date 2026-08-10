@@ -92,6 +92,20 @@ def _integrity_seal_status(
     }
 
 
+def _runtime_executable_file_available(candidate: Path) -> bool:
+    """Apply the host-appropriate pre-execution file availability check."""
+
+    if not candidate.is_file():
+        return False
+    if sys.platform == "win32":
+        # os.access(..., X_OK) reflects POSIX mode emulation inconsistently for
+        # an extracted Windows ZIP and is not the Windows execution contract.
+        # Require a regular, non-link PE launcher; manifest/hash verification
+        # and an actual version execution are enforced by the caller.
+        return not candidate.is_symlink() and candidate.suffix.casefold() == ".exe"
+    return os.access(candidate, os.X_OK)
+
+
 def _protected_sentinel(character: str) -> str:
     return f"[QAZMORPH-U{ord(character):06X}]"
 
@@ -852,7 +866,8 @@ class FSTBackend:
         explicit = os.environ.get(env_name)
         if explicit:
             candidate = Path(explicit).expanduser()
-            if candidate.is_file() and os.access(candidate, os.X_OK):
+            if _runtime_executable_file_available(candidate):
+                self._probe_windows_executable(name, candidate, command=None)
                 self._executable_origins[name] = f"explicit:{env_name}"
                 self._executable_verified[name] = False
                 return str(candidate)
@@ -898,18 +913,69 @@ class FSTBackend:
             or expected_hash != file_record["sha256"]
         ):
             raise BackendError(f"Bound toolchain command inventory is invalid: {name!r}")
-        if not candidate.is_file() or not os.access(candidate, os.X_OK):
+        if not _runtime_executable_file_available(candidate):
             raise BackendError(f"Bound toolchain executable is unavailable: {candidate}")
         if candidate.stat().st_size != file_record["bytes"]:
             raise BackendError(f"Bound toolchain executable size verification failed: {name}")
         digest = hashlib.sha256(candidate.read_bytes()).hexdigest()
         if digest != expected_hash:
             raise BackendError(f"Bound toolchain executable checksum failed: {name}")
+        self._probe_windows_executable(name, candidate, command=command)
         self._executable_origins[name] = getattr(
             self, "toolchain_origin", "resource-bound-toolchain"
         )
         self._executable_verified[name] = True
         return str(candidate)
+
+    def _probe_windows_executable(
+        self,
+        name: str,
+        candidate: Path,
+        *,
+        command: dict[str, Any] | None,
+    ) -> None:
+        """Execute the real Windows helper before accepting it as available."""
+
+        if sys.platform != "win32":
+            return
+        version_args = command.get("version_args") if command is not None else None
+        if not isinstance(version_args, list) or any(
+            not isinstance(argument, str) or not argument for argument in version_args
+        ):
+            version_args = ["-v"] if name == "cg-proc" else ["--version"]
+        environment = dict(self.environment)
+        environment.update({"LC_ALL": "C", "LANG": "C", "TZ": "UTC"})
+        try:
+            completed = subprocess.run(
+                [str(candidate), *version_args],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                env=environment,
+                timeout=10.0,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise BackendError(
+                f"Windows runtime executable probe failed for {name}: {exc}"
+            ) from exc
+        if len(completed.stdout) > 1024 * 1024:
+            raise BackendError(
+                f"Windows runtime executable probe output is unbounded: {name}"
+            )
+        output = "\n".join(
+            line.rstrip()
+            for line in completed.stdout.decode("utf-8", errors="replace").splitlines()
+        ).strip()
+        output = output.replace(str(candidate), candidate.name)
+        if completed.returncode or not output:
+            raise BackendError(
+                f"Windows runtime executable probe exited {completed.returncode}: {name}"
+            )
+        expected = command.get("version_output") if command is not None else None
+        if isinstance(expected, str) and output != expected:
+            raise BackendError(
+                f"Windows runtime executable version output changed: {name}"
+            )
 
     @property
     def resource_version(self) -> str:
@@ -1021,6 +1087,12 @@ class FSTBackend:
                     "sha256": digest.hexdigest(),
                     "origin": origin,
                     "verified": verified,
+                    "os_access_x_ok": os.access(path, os.X_OK),
+                    "availability_contract": (
+                        "regular-exe-manifest-hash-successful-version-execution"
+                        if sys.platform == "win32"
+                        else "posix-regular-file-and-x-ok"
+                    ),
                 }
                 if executable_error is not None:
                     executable["error"] = executable_error

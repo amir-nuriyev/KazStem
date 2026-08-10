@@ -11,6 +11,7 @@ from unittest import mock
 from qazmorph.backend import (
     _hyphen_chains,
     _integrity_seal_status,
+    _runtime_executable_file_available,
     BackendError,
     escape_apertium_text,
     FSTBackend,
@@ -424,6 +425,73 @@ class ResourceManifestTests(unittest.TestCase):
                 )
             self.assertFalse(observed["integrity_seal_verified"])
 
+    def test_windows_exe_availability_does_not_depend_on_posix_x_ok(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            executable = root / "helper.exe"
+            executable.write_bytes(b"MZfixture")
+            non_executable = root / "helper.txt"
+            non_executable.write_bytes(b"not a PE launcher")
+            with mock.patch("qazmorph.backend.sys.platform", "win32"), mock.patch(
+                "qazmorph.backend.os.access", return_value=False
+            ):
+                self.assertTrue(_runtime_executable_file_available(executable))
+                self.assertFalse(_runtime_executable_file_available(non_executable))
+
+    def test_windows_bound_exe_requires_successful_manifest_version_execution(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            executable = root / "usr" / "bin" / "cg-proc.exe"
+            executable.parent.mkdir(parents=True)
+            payload = b"MZfixture"
+            executable.write_bytes(payload)
+            digest = hashlib.sha256(payload).hexdigest()
+            backend = FSTBackend.__new__(FSTBackend)
+            backend.toolchain_dir = root
+            backend.toolchain_manifest = {
+                "commands": {
+                    "cg-proc": {
+                        "path": "usr/bin/cg-proc.exe",
+                        "sha256": digest,
+                        "version_args": ["-v"],
+                        "version_output": "CG-3 1.6.8",
+                    }
+                },
+                "files": {
+                    "usr/bin/cg-proc.exe": {
+                        "kind": "file",
+                        "bytes": len(payload),
+                        "sha256": digest,
+                    }
+                },
+            }
+            backend.environment = {}
+            backend._executable_origins = {}
+            backend._executable_verified = {}
+            completed = mock.Mock(
+                returncode=0,
+                stdout=b"CG-3 1.6.8\r\n",
+            )
+            with mock.patch("qazmorph.backend.sys.platform", "win32"), mock.patch(
+                "qazmorph.backend.os.access", return_value=False
+            ), mock.patch("qazmorph.backend.subprocess.run", return_value=completed) as run:
+                selected = backend._find_executable(
+                    "cg-proc", "QAZMORPH_TEST_CG_PROC"
+                )
+            self.assertEqual(selected, str(executable))
+            self.assertTrue(backend._executable_verified["cg-proc"])
+            self.assertEqual(run.call_args.args[0], [str(executable), "-v"])
+
+            backend.toolchain_manifest["commands"]["cg-proc"][
+                "version_output"
+            ] = "different"
+            with mock.patch("qazmorph.backend.sys.platform", "win32"), mock.patch(
+                "qazmorph.backend.os.access", return_value=False
+            ), mock.patch("qazmorph.backend.subprocess.run", return_value=completed), self.assertRaisesRegex(
+                BackendError, "version output changed"
+            ):
+                backend._find_executable("cg-proc", "QAZMORPH_TEST_CG_PROC")
+
     def test_windows_complete_rehash_can_be_official_with_writable_zip_directories(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -434,7 +502,9 @@ class ResourceManifestTests(unittest.TestCase):
             )
             backend = self.runtime_backend(resource_dir, manifest, root / "toolchain")
 
-            with mock.patch("qazmorph.backend.sys.platform", "win32"):
+            with mock.patch("qazmorph.backend.sys.platform", "win32"), mock.patch(
+                "qazmorph.backend.os.access", return_value=False
+            ):
                 provenance = backend.runtime_provenance()
 
             self.assertTrue(provenance["official"])
@@ -447,6 +517,12 @@ class ResourceManifestTests(unittest.TestCase):
             self.assertTrue(provenance["toolchain_inventory"]["content_rehashed"])
             self.assertFalse(
                 provenance["toolchain_inventory"]["sealed_read_only"]
+            )
+            executable = provenance["executables"]["hfst-proc"]
+            self.assertFalse(executable["os_access_x_ok"])
+            self.assertEqual(
+                executable["availability_contract"],
+                "regular-exe-manifest-hash-successful-version-execution",
             )
 
     def test_v3_runtime_requires_a_sealed_resource_bundle(self) -> None:

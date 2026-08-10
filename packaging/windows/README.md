@@ -48,8 +48,10 @@ ZIP hashes.
 A fresh extraction outside the checkout must prove:
 
 1. `platform.machine()` and `AMD64` normalize to `x86_64`;
-2. all three native `.exe` files pass `os.access(path, os.X_OK)` and execute
-   without modifying `PATH`, installing software, or requiring elevation;
+2. all three native helpers are regular `.exe` files, match the manifest hash,
+   and actually execute their version probes without modifying `PATH`,
+   installing software, or requiring elevation; `os.access(path, os.X_OK)` is
+   recorded truthfully but is not treated as a Windows execution permission;
 3. the manifest-bound DLL closure resolves beside the helpers, with no missing,
    ambiguous, PATH-sourced, non-AMD64, or unallowlisted import;
 4. the complete-inventory/forced-rehash Windows integrity contract reports

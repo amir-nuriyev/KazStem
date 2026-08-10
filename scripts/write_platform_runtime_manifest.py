@@ -582,9 +582,18 @@ def build_manifest(
     )
     commands: dict[str, dict[str, Any]] = {}
     files = extracted_files(runtime_dir, output=output)
+    windows_runtime = source_lock["platform"]["system"] == "windows"
     for command in source_lock["required_commands"]:
         executable = runtime_dir / command["path"]
-        if not executable.is_file() or not os.access(executable, os.X_OK):
+        if (
+            not executable.is_file()
+            or executable.is_symlink()
+            or (not windows_runtime and not os.access(executable, os.X_OK))
+            or (
+                windows_runtime
+                and executable.suffix.casefold() != ".exe"
+            )
+        ):
             raise ManifestError(f"required runtime executable is missing: {executable}")
         resolved = executable.resolve(strict=True)
         try:
@@ -594,13 +603,20 @@ def build_manifest(
         file_metadata = files.get(resolved_relative)
         if not isinstance(file_metadata, dict) or file_metadata.get("kind") != "file":
             raise ManifestError(f"runtime executable is absent from inventory: {executable}")
-        commands[command["name"]] = {
+        command_record: dict[str, Any] = {
             "path": command["path"],
             "sha256": file_metadata["sha256"],
             "version_output": command_output(
                 [str(executable), *command["version_args"]]
             ),
         }
+        if windows_runtime:
+            command_record["version_args"] = list(command["version_args"])
+            command_record["os_access_x_ok"] = os.access(executable, os.X_OK)
+            command_record["availability_contract"] = (
+                "regular-exe-manifest-hash-successful-version-execution"
+            )
+        commands[command["name"]] = command_record
     dependency_closure = audit_pe_dependency_closure(
         runtime_dir, source_lock, files
     )

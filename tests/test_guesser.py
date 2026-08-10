@@ -81,8 +81,17 @@ class PersistentGuesserTests(unittest.TestCase):
                     handle.write("started\\n")
                 mode_file = Path(os.environ["QAZMORPH_FAKE_LOOKUP_MODE"])
 
-                for record in sys.stdin:
-                    surface = record.rstrip("\\r\\n")
+                sys.stdout.reconfigure(
+                    encoding="utf-8", errors="strict", newline="\\n", write_through=True
+                )
+                sys.stderr.reconfigure(
+                    encoding="utf-8", errors="strict", newline="\\n", write_through=True
+                )
+
+                for record in sys.stdin.buffer:
+                    surface = record.rstrip(b"\\r\\n").decode(
+                        "utf-8", errors="strict"
+                    )
                     mode = mode_file.read_text(encoding="utf-8").strip()
                     if mode == "failure":
                         print("deliberate lookup failure", file=sys.stderr, flush=True)

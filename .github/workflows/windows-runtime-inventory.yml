@@ -42,6 +42,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           $env:PYTHONPATH = (Join-Path $env:GITHUB_WORKSPACE 'src')
           python -m unittest `
             tests.test_provenance_manifests.PlatformRuntimeManifestTests.test_new_platform_runtime_version_label_is_explicit `
@@ -56,6 +57,8 @@ jobs:
             tests.test_provenance_manifests.PlatformRuntimeManifestTests.test_windows_hfst_bound_probe_has_timeout_and_semantic_control `
             tests.test_backend.ResourceManifestTests.test_windows_integrity_seal_uses_fresh_hashes_not_posix_directory_bits `
             tests.test_backend.ResourceManifestTests.test_windows_integrity_seal_never_accepts_a_cached_or_partial_inventory `
+            tests.test_backend.ResourceManifestTests.test_windows_exe_availability_does_not_depend_on_posix_x_ok `
+            tests.test_backend.ResourceManifestTests.test_windows_bound_exe_requires_successful_manifest_version_execution `
             tests.test_guesser.PersistentGuesserTests.test_windows_uses_bounded_one_shot_queries_instead_of_pipe_selectors `
             tests.test_guesser.PersistentGuesserTests.test_windows_one_shot_passes_a_plus_one_completeness_sentinel `
             tests.test_guesser.PersistentGuesserTests.test_windows_one_shot_timeout_terminates_the_helper `
@@ -65,12 +68,15 @@ jobs:
             tests.test_guesser.PersistentGuesserTests.test_windows_hard_stdout_cap_never_caches_partial_candidates `
             tests.test_guesser.PersistentGuesserTests.test_windows_hard_stderr_cap_reaps_helper_and_recovers `
             tests.test_guesser.PersistentGuesserTests.test_windows_reader_start_failure_still_reaps_helper
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -c "from qazmorph.platform_runtime import normalized_runtime_platform; assert normalized_runtime_platform() == ('windows', 'x86_64'); assert normalized_runtime_platform('win32', 'AMD64') == ('windows', 'x86_64')"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Fetch and hash only locked Project.JJ binaries and corresponding source
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           $work = Join-Path $env:RUNNER_TEMP 'kazstem-windows-runtime'
           New-Item -ItemType Directory -Path $work | Out-Null
           python packaging/windows/fetch_locked_inputs.py `
@@ -78,6 +84,7 @@ jobs:
             --archives (Join-Path $work 'inputs/binaries') `
             --sources (Join-Path $work 'inputs/sources') `
             | Tee-Object -FilePath (Join-Path $work 'locked-downloads.txt')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $hfstProbe = Join-Path $work 'hfst-option-probe'
           Expand-Archive `
             (Join-Path $work 'inputs/binaries/hfst-3.17.2+g4028~e16268eb.x86_64.zip') `
@@ -85,12 +92,14 @@ jobs:
           python packaging/windows/probe_hfst_bounds.py `
             --root $hfstProbe `
             --output (Join-Path $work 'bounded-helper-options.json')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           "KAZSTEM_WINDOWS_WORK=$work" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Build twice in distinct roots and require byte identity
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           $work = $env:KAZSTEM_WINDOWS_WORK
           $common = @(
             '--archives', (Join-Path $work 'inputs/binaries'),
@@ -102,14 +111,17 @@ jobs:
             --output-parent (Join-Path $work 'build-a/platform-runtimes') `
             --lock-output (Join-Path $work 'build-a/platform_runtime_assets.lock.json') `
             --json (Join-Path $work 'build-a/runtime-build.json')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python packaging/windows/build_runtime.py @common `
             --output-parent (Join-Path $work 'build-b/platform-runtimes') `
             --lock-output (Join-Path $work 'build-b/platform_runtime_assets.lock.json') `
             --json (Join-Path $work 'build-b/runtime-build.json')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python packaging/windows/compare_runtime_builds.py `
             (Join-Path $work 'build-a/platform-runtimes') `
             (Join-Path $work 'build-b/platform-runtimes') `
             --output (Join-Path $work 'runtime-reproducibility.json')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $firstLock = (Get-FileHash -Algorithm SHA256 (Join-Path $work 'build-a/platform_runtime_assets.lock.json')).Hash
           $secondLock = (Get-FileHash -Algorithm SHA256 (Join-Path $work 'build-b/platform_runtime_assets.lock.json')).Hash
           if ($firstLock -ne $secondLock) {
@@ -120,6 +132,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
           $work = $env:KAZSTEM_WINDOWS_WORK
           $evidence = Join-Path $work 'evidence'
           New-Item -ItemType Directory -Path $evidence | Out-Null
@@ -136,6 +149,7 @@ jobs:
             --forbid $env:GITHUB_WORKSPACE `
             --forbid $env:RUNNER_TEMP `
             --output (Join-Path $evidence 'logical-evidence-path-audit.json')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Upload private runtime candidate (not a release asset)
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

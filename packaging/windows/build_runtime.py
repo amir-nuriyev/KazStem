@@ -257,11 +257,38 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
     proposed_lock = {"schema": base_lock["schema"], "runtimes": runtimes}
     atomic_write(args.lock_output.resolve(), proposed_lock)
 
+    final_binary_dir = final / "usr" / "bin"
     executable_access = {
-        name: os.access(binary_dir / name, os.X_OK) for name in sorted(COMMANDS)
+        name: os.access(final_binary_dir / name, os.X_OK)
+        for name in sorted(COMMANDS)
     }
-    if not all(executable_access.values()):
-        raise BuildError(f"Windows executable X_OK probe failed: {executable_access}")
+    executable_availability = {
+        name: {
+            "regular_exe": (
+                (final_binary_dir / name).is_file()
+                and not (final_binary_dir / name).is_symlink()
+                and (final_binary_dir / name).suffix.casefold() == ".exe"
+            ),
+            "manifest_hash_bound": manifest["commands"][name.removesuffix(".exe")][
+                "sha256"
+            ]
+            == file_record(final_binary_dir / name)["sha256"],
+            "version_execution_succeeded": bool(
+                manifest["commands"][name.removesuffix(".exe")]["version_output"]
+            ),
+            "os_access_x_ok": executable_access[name],
+        }
+        for name in sorted(COMMANDS)
+    }
+    if not all(
+        record["regular_exe"]
+        and record["manifest_hash_bound"]
+        and record["version_execution_succeeded"]
+        for record in executable_availability.values()
+    ):
+        raise BuildError(
+            f"Windows executable availability proof failed: {executable_availability}"
+        )
     return {
         "schema": "kazstem-windows-runtime-build-v1",
         "platform": {"system": "windows", "machine": "x86_64"},
@@ -274,6 +301,10 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
         ),
         "pe_dependency_closure": manifest["dependency_closure"],
         "executable_access": executable_access,
+        "executable_availability": executable_availability,
+        "availability_contract": (
+            "regular-exe-manifest-hash-successful-version-execution"
+        ),
         "dll_layout": "all non-system imports adjacent to the three helper executables",
         "symlinks": 0,
         "admin_privileges_required": False,

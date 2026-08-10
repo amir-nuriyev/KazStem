@@ -423,10 +423,13 @@ class PlatformRuntimeManifestTests(unittest.TestCase):
         self.assertNotIn("openssl", json.dumps(lock).casefold())
 
     def test_windows_zip_inventory_rejects_cross_platform_escapes_and_links(self) -> None:
+        with self.assertRaisesRegex(
+            windows_runtime.BuildError, "unsafe ZIP member path"
+        ):
+            windows_runtime.portable_zip_name("usr\\bin\\escape.exe")
         for member in (
             "../escape.exe",
             "C:/escape.exe",
-            "usr\\bin\\escape.exe",
         ):
             with self.subTest(member=member), tempfile.TemporaryDirectory() as temporary:
                 archive = Path(temporary) / "unsafe.zip"
@@ -608,6 +611,17 @@ class PlatformRuntimeManifestTests(unittest.TestCase):
             self.assertEqual(report["semantic_query"]["control_nonempty_rows"], 2)
             self.assertEqual(report["semantic_query"]["bounded_nonempty_rows"], 1)
 
+    def test_windows_builder_reports_x_ok_without_using_it_as_the_gate(self) -> None:
+        builder = (
+            PROJECT_ROOT / "packaging" / "windows" / "build_runtime.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn('"os_access_x_ok": executable_access[name]', builder)
+        self.assertIn(
+            '"regular-exe-manifest-hash-successful-version-execution"',
+            builder,
+        )
+        self.assertNotIn("if not all(executable_access.values())", builder)
+
     def test_checked_in_linux_recipe_reproduces_the_locked_runtime_identity(self) -> None:
         lock_path = (
             PROJECT_ROOT
@@ -723,6 +737,10 @@ class PlatformRuntimeManifestTests(unittest.TestCase):
         self.assertIn(
             "test_windows_hard_stdout_cap_never_caches_partial_candidates",
             workflow,
+        )
+        self.assertEqual(
+            workflow.count("if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }"),
+            workflow.count("\n          python "),
         )
 
     def test_unpublished_0_2_2_changelog_is_folded_into_0_2_3(self) -> None:
