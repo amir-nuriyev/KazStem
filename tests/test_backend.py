@@ -983,6 +983,17 @@ class ResourceManifestTests(unittest.TestCase):
             self.assertFalse(provenance["verified"])
             self.assertIn("QAZMORPH_TEST_HFST_PROC", provenance["non_official_reasons"][0])
 
+            with mock.patch("qazmorph.backend.sys.platform", "win32"), mock.patch(
+                "qazmorph.backend.os.access", return_value=False
+            ):
+                windows_provenance = backend.runtime_provenance()
+            self.assertEqual(
+                windows_provenance["executables"]["hfst-proc"][
+                    "availability_contract"
+                ],
+                "regular-exe-successful-version-execution-unverified-override",
+            )
+
             backend.guesser_verified_finite = False
             backend.guesser_productive_safe = False
             proofless = backend.runtime_provenance()

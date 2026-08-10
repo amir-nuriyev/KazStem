@@ -587,7 +587,7 @@ def build_manifest(
         executable = runtime_dir / command["path"]
         if (
             not executable.is_file()
-            or executable.is_symlink()
+            or (windows_runtime and executable.is_symlink())
             or (not windows_runtime and not os.access(executable, os.X_OK))
             or (
                 windows_runtime
@@ -612,7 +612,6 @@ def build_manifest(
         }
         if windows_runtime:
             command_record["version_args"] = list(command["version_args"])
-            command_record["os_access_x_ok"] = os.access(executable, os.X_OK)
             command_record["availability_contract"] = (
                 "regular-exe-manifest-hash-successful-version-execution"
             )

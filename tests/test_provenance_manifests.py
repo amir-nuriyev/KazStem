@@ -621,6 +621,10 @@ class PlatformRuntimeManifestTests(unittest.TestCase):
             builder,
         )
         self.assertNotIn("if not all(executable_access.values())", builder)
+        manifest_writer = (
+            PROJECT_ROOT / "scripts" / "write_platform_runtime_manifest.py"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn('command_record["os_access_x_ok"]', manifest_writer)
 
     def test_checked_in_linux_recipe_reproduces_the_locked_runtime_identity(self) -> None:
         lock_path = (
@@ -847,6 +851,104 @@ class PlatformRuntimeManifestTests(unittest.TestCase):
 
             self.assertEqual(inventory["usr/bin/alias"]["target"], "actual")
             self.assertEqual(inventory["usr/bin/actual"]["bytes"], 7)
+
+    def test_posix_command_symlink_is_preserved_but_windows_rejects_it(self) -> None:
+        def fixture(root: Path, *, system: str) -> tuple[dict[str, object], Path, Path, Path, Path]:
+            runtime = root / "runtime"
+            binary = runtime / "usr" / "bin"
+            binary.mkdir(parents=True)
+            suffix = ".exe" if system == "windows" else ""
+            target = binary / f"tool-real{suffix}"
+            target.write_text("#!/bin/sh\nprintf 'tool 1\\n'\n", encoding="utf-8")
+            target.chmod(0o755)
+            command = binary / f"tool{suffix}"
+            command.symlink_to(target.name)
+            archives = root / "archives"
+            sources = root / "sources"
+            archives.mkdir()
+            sources.mkdir()
+            archive = archives / "tool.zip"
+            source = sources / "tool-source.tar.gz"
+            archive.write_bytes(b"archive")
+            source.write_bytes(b"source")
+            lock_path = root / "source-lock.json"
+            lock_path.write_text("{}\n", encoding="utf-8")
+            lock: dict[str, object] = {
+                "schema": platform_runtime.LOCK_SCHEMA,
+                "distribution": "fixture",
+                "platform": {
+                    "system": system,
+                    "machine": "x86_64",
+                    "minimum_os": "fixture",
+                },
+                "runtime_version_label": f"{system}-fixture",
+                "required_commands": [
+                    {
+                        "name": "tool",
+                        "path": f"usr/bin/tool{suffix}",
+                        "version_args": ["--version"],
+                    }
+                ],
+                "archives": [
+                    {
+                        "component": "tool",
+                        "filename": archive.name,
+                        "url": "https://example.invalid/tool.zip",
+                        **platform_runtime.file_record(archive),
+                    }
+                ],
+                "corresponding_sources": [
+                    {
+                        "component": "tool",
+                        "revision": "fixture",
+                        "filename": source.name,
+                        "url": "https://example.invalid/tool-source.tar.gz",
+                        **platform_runtime.file_record(source),
+                    }
+                ],
+                "components": [
+                    {"name": "tool", "version": "1", "license": "fixture"}
+                ],
+            }
+            return lock, runtime, archives, sources, lock_path
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            lock, runtime, archives, sources, lock_path = fixture(
+                root, system="linux"
+            )
+            manifest = platform_runtime.build_manifest(
+                runtime,
+                archives,
+                sources,
+                runtime / "manifest.json",
+                lock,
+                lock_path,
+            )
+            self.assertEqual(
+                manifest["files"]["usr/bin/tool"]["target"], "tool-real"
+            )
+            self.assertEqual(
+                manifest["commands"]["tool"]["sha256"],
+                platform_runtime.sha256(runtime / "usr/bin/tool-real"),
+            )
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            lock, runtime, archives, sources, lock_path = fixture(
+                root, system="windows"
+            )
+            with self.assertRaisesRegex(
+                platform_runtime.ManifestError, "required runtime executable"
+            ):
+                platform_runtime.build_manifest(
+                    runtime,
+                    archives,
+                    sources,
+                    runtime / "manifest.json",
+                    lock,
+                    lock_path,
+                )
 
     def test_corresponding_source_directory_tampering_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

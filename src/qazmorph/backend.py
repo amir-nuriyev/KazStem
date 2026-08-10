@@ -1089,7 +1089,11 @@ class FSTBackend:
                     "verified": verified,
                     "os_access_x_ok": os.access(path, os.X_OK),
                     "availability_contract": (
-                        "regular-exe-manifest-hash-successful-version-execution"
+                        (
+                            "regular-exe-manifest-hash-successful-version-execution"
+                            if origin in bound_origins
+                            else "regular-exe-successful-version-execution-unverified-override"
+                        )
                         if sys.platform == "win32"
                         else "posix-regular-file-and-x-ok"
                     ),
