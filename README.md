@@ -373,10 +373,13 @@ under GPL, LGPL, Apache-2.0, Expat, ICU, and public-domain terms; the exact
 component notices and neural-model licensing caveat are listed in
 [THIRD_PARTY.md](THIRD_PARTY.md).
 
-The MyStem binary is not used, inspected, decompiled, or redistributed. Yandex's
-license expressly restricts reverse engineering; this implementation relies on
-public behavior documentation, the published algorithm paper, and independent
-Kazakh resources.
+MyStem is not a runtime or build dependency and is not redistributed. Yandex's
+official Linux 3.1 binary was downloaded and executed only as a black box for
+the fixed serializer-envelope probes recorded in
+[docs/MYSTEM_COMPATIBILITY.md](docs/MYSTEM_COMPATIBILITY.md). It was not
+decompiled, disassembled, modified, or incorporated. The Kazakh implementation
+relies on public behavior documentation, the published algorithm paper, and
+independent Kazakh resources.
 
 ## Citation
 
