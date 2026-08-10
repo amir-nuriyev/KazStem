@@ -1198,6 +1198,17 @@ class PlatformRuntimeManifestTests(unittest.TestCase):
             workflow.count("\n          python "),
         )
 
+    def test_pypi_publisher_action_is_pinned_to_reviewed_v1_14_2_commit(self) -> None:
+        workflow = (
+            PROJECT_ROOT / ".github" / "workflows" / "publish-pypi.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            "pypa/gh-action-pypi-publish@"
+            "dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2",
+            workflow,
+        )
+        self.assertNotIn("pypa/gh-action-pypi-publish@release/", workflow)
+
     def test_unpublished_0_2_2_changelog_is_folded_into_0_2_3(self) -> None:
         changelog = (PROJECT_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
         self.assertNotIn("## 0.2.2", changelog)
