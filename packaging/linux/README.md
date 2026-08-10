@@ -70,12 +70,28 @@ timestamps. A release candidate must pass, from a fresh extraction:
 
 The checked black-box and expanded gates are
 `packaging/linux/blackbox_linux_bundle.py` and
-`packaging/linux/practical_matrix_linux.py`. Pass the latter the full final
-Git commit with `--source-commit`; evidence from an older candidate commit is
-not reusable. The source companion README must be rendered from
+`packaging/linux/practical_matrix_linux.py`. Pass both the final strict release
+identity with `--identity`; version, commit, wheel, and root-name overrides are
+not accepted, so evidence from an older candidate is not reusable. The source
+companion README must be rendered from
 `packaging/linux/CORRESPONDING-SOURCE-README.template.md` and all placeholders
 must be replaced before its archive is hashed.
 
 No source archive, OpenSSL source, neural weights, installer, updater, or
 network client belongs in the ready-run binary archive.  Corresponding source
 is a separate checksum-bound release asset.
+
+## Final release orchestration
+
+The parameterized final tooling is documented in
+`packaging/linux/RELEASE-IDENTITY.md`. All assemblers, archive auditors, the
+compatibility benchmark, and the finalizer consume one strict
+`kazstem-linux-release-identity-v1` file. The identity checksum-binds every
+input and output, supplies exact release-download URLs, caps all outer and
+nested archives, and contains no build-root paths.
+
+The final sequence is source assembly, source observation binding, binary
+assembly, binary observation binding, two clean-root reproductions, fresh
+binary/source audits, practical gates, evidence binding, audit replay, and
+finalization. Observation mismatches remain failures and are never publishable
+release candidates.

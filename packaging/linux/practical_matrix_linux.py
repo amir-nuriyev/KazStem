@@ -9,7 +9,6 @@ from pathlib import Path
 import platform
 import random
 import re
-import resource
 import statistics
 import stat
 import subprocess
@@ -18,6 +17,8 @@ import tempfile
 import time
 from typing import Any
 from xml.etree import ElementTree
+
+from release_common import ReleaseError, ensure_output_outside, load_identity, verify_artifact
 
 
 if not __debug__:
@@ -551,27 +552,40 @@ class Matrix:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("root", type=Path)
+    parser.add_argument("--identity", required=True, type=Path)
     parser.add_argument("--wheel", required=True, type=Path)
-    parser.add_argument("--expected-version", default="0.2.3")
-    parser.add_argument("--source-commit", required=True)
     parser.add_argument("--json", required=True, type=Path)
     args = parser.parse_args()
-    if re.fullmatch(r"[0-9a-f]{40}", args.source_commit) is None:
-        parser.error("--source-commit must be a full lowercase Git commit")
+    identity = load_identity(args.identity.resolve(strict=True))
+    root = args.root.resolve(strict=True)
+    if root.name != identity["ready_run"]["top_level"]:
+        raise ReleaseError("practical-matrix root name differs from release identity")
+    ensure_output_outside(args.json, root, label="practical evidence output")
+    if args.json.exists() or args.json.is_symlink():
+        raise ReleaseError(f"practical evidence output already exists: {args.json}")
+    verify_artifact(
+        args.wheel.resolve(strict=True),
+        identity["artifacts"]["wheel"],
+        label="practical-matrix wheel",
+    )
     matrix = Matrix(
-        args.root,
+        root,
         args.wheel,
-        expected_version=args.expected_version,
-        source_commit=args.source_commit,
+        expected_version=identity["release"],
+        source_commit=identity["source_commit"],
     )
     try:
         result = matrix.execute()
     finally:
         matrix.close()
+    result["release"] = identity["release"]
     args.json.write_text(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
     print(f"PASS: {result['cases']} practical/performance cases")
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except (ReleaseError, OSError, ValueError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"error: {exc}") from exc

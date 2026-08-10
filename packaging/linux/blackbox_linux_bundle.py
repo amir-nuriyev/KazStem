@@ -12,6 +12,8 @@ import tempfile
 import time
 from xml.etree import ElementTree
 
+from release_common import ReleaseError, ensure_output_outside, load_identity, read_json
+
 
 if not __debug__:
     raise RuntimeError("the Linux black-box release gate must not run with -O")
@@ -30,10 +32,13 @@ def sha256_file(path: Path) -> str:
 
 
 class Gate:
-    def __init__(self, root: Path, expected_version: str) -> None:
+    def __init__(
+        self, root: Path, expected_version: str, expected_resource_version: str
+    ) -> None:
         self.root = root.resolve(strict=True)
         self.executable = self.root / "kazstem"
         self.expected_version = expected_version
+        self.expected_resource_version = expected_resource_version
         self.results: list[dict[str, object]] = []
 
     def run(
@@ -115,7 +120,7 @@ class Gate:
         assert {
             record.get("resource_version") for record in base_records
             if record.get("record_type") == "token"
-        } == {"apertium-kaz-95c6dd0d8536+qazmorph-f03e703d3e2a6704"}
+        } == {self.expected_resource_version}
 
         oov_text = "суперқазақшалар\n"
         oov = self.run(
@@ -292,10 +297,35 @@ class Gate:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("root", type=Path)
-    parser.add_argument("--expected-version", default="0.2.3")
+    parser.add_argument("--identity", required=True, type=Path)
     parser.add_argument("--json", type=Path)
     args = parser.parse_args()
-    summary = Gate(args.root, args.expected_version).execute()
+    identity = load_identity(args.identity.resolve(strict=True))
+    root = args.root.resolve(strict=True)
+    if root.name != identity["ready_run"]["top_level"]:
+        raise ReleaseError("black-box root name differs from the release identity")
+    if args.json:
+        ensure_output_outside(args.json, root, label="black-box evidence output")
+    if args.json and (args.json.exists() or args.json.is_symlink()):
+        raise ReleaseError(f"black-box evidence output already exists: {args.json}")
+    resource_manifest = read_json(
+        root / identity["ready_run"]["resource_destination"] / "manifest.json"
+    )
+    if (
+        not isinstance(resource_manifest, dict)
+        or resource_manifest.get("bundle_id")
+        != identity["inputs"]["resource_tree"]["bundle_id"]
+        or not isinstance(resource_manifest.get("version"), str)
+        or not resource_manifest["version"]
+    ):
+        raise ReleaseError("embedded resource manifest differs from release identity")
+    summary = Gate(
+        root,
+        identity["release"],
+        resource_manifest["version"],
+    ).execute()
+    summary["release"] = identity["release"]
+    summary["source_commit"] = identity["source_commit"]
     value = json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     if args.json:
         args.json.write_text(value, encoding="utf-8")
@@ -306,4 +336,7 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except (ReleaseError, OSError, ValueError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"error: {exc}") from exc

@@ -11,6 +11,8 @@ import re
 import subprocess
 from typing import Any
 
+from release_common import ReleaseError, ensure_output_outside, load_identity
+
 
 ELF_MAGIC = b"\x7fELF"
 ALLOWED_HOST_PREFIXES = (
@@ -72,9 +74,16 @@ def package(path: Path) -> dict[str, str] | None:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("root", type=Path)
+    parser.add_argument("--identity", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
+    if args.output.exists() or args.output.is_symlink():
+        raise ReleaseError(f"ELF evidence output already exists: {args.output}")
+    identity = load_identity(args.identity.resolve(strict=True))
     root = args.root.resolve(strict=True)
+    if root.name != identity["ready_run"]["top_level"]:
+        raise ReleaseError("ELF-audit root name differs from release identity")
+    ensure_output_outside(args.output, root, label="ELF evidence output")
     runtime_libs = sorted(root.glob(".qazmorph/platform-runtimes/*/usr/lib/x86_64-linux-gnu"))
     library_path = ":".join(str(path) for path in runtime_libs)
     environment = os.environ.copy()
@@ -125,26 +134,29 @@ def main() -> int:
                 selected_relative = None
             if selected_relative is not None:
                 classification = "bundled"
+                logical_path = selected_relative
             elif str(selected_path).startswith(ALLOWED_HOST_PREFIXES):
                 classification = "ubuntu-host"
                 key = str(selected_path)
+                logical_path = f"ubuntu-host/{selected_path.as_posix().lstrip('/')}"
                 host.setdefault(
                     key,
                     {
-                        "path": key,
+                        "path": logical_path,
                         "soname": name.strip(),
                         "owner": package(selected_path),
                     },
                 )
             else:
                 classification = "escaped"
+                logical_path = str(selected_path)
                 escaped.append({"elf": relative, "dependency": str(selected_path)})
             if name.strip() in BANNED or selected_path.name in BANNED:
                 banned.append({"elf": relative, "dependency": selected_path.name})
             resolved.append(
                 {
                     "name": name.strip(),
-                    "path": selected_relative or str(selected_path),
+                    "path": logical_path,
                     "classification": classification,
                 }
             )
@@ -170,7 +182,9 @@ def main() -> int:
     )
     result = {
         "schema": "kazstem-linux-elf-closure-v1",
-        "target": "Ubuntu 24.04 x86_64 (glibc 2.39)",
+        "release": identity["release"],
+        "source_commit": identity["source_commit"],
+        "target": identity["platform"]["advertised_target"],
         "root": root.name,
         "elf_count": len(elfs),
         "elfs": records,
@@ -199,4 +213,7 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except (ReleaseError, OSError, ValueError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"error: {exc}") from exc

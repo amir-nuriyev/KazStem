@@ -1,11 +1,12 @@
 # KazStem @VERSION@ Linux corresponding source
 
 This archive is the checksum-bound source companion for
-`@BINARY_ARCHIVE@`. It is not needed at runtime and must be published beside
-that binary under the release URL recorded in the binary's
+`@BINARY_ARCHIVE@` at `@BINARY_URL@`. It is not needed at runtime and must be
+published beside that binary under `@RELEASE_URL@`, as recorded in the binary's
 `CORRESPONDING-SOURCE.json`.
 
-The KazStem application source is commit `@SOURCE_COMMIT@`. The canonical
+The KazStem application source is commit `@SOURCE_COMMIT@` with
+`SOURCE_DATE_EPOCH=@SOURCE_DATE_EPOCH@`. The canonical
 Python wheel is `@WHEEL_FILENAME@` (SHA-256 `@WHEEL_SHA256@`) and the canonical
 sdist is `@SDIST_FILENAME@` (SHA-256 `@SDIST_SHA256@`). The linguistic bundle
 is resource `@RESOURCE_BUNDLE_ID@`. The detached Ubuntu runtime is bundle
