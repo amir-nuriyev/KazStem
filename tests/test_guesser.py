@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 import os
 from pathlib import Path
 import select
+import sys
 import tempfile
 import textwrap
 import threading
@@ -91,6 +92,34 @@ class PersistentGuesserTests(unittest.TestCase):
                         sys.stdout.flush()
                         time.sleep(5)
                         continue
+                    if mode == "stdout_flood":
+                        row = f"{surface}\\t{surface}<n><nom>\\t0.0\\n".encode("utf-8")
+                        while True:
+                            sys.stdout.buffer.write(row * 256)
+                            sys.stdout.buffer.flush()
+                    if mode in {"invalid_utf8", "invalid_utf8_once"}:
+                        if mode.endswith("_once"):
+                            mode_file.write_text("normal", encoding="utf-8")
+                        sys.stdout.buffer.write(
+                            surface.encode("utf-8") + b"\\tbad\\xff\\t0.0\\n\\n"
+                        )
+                        sys.stdout.buffer.flush()
+                        continue
+                    if mode == "bare_cr":
+                        sys.stdout.write(f"{surface}\\tbad\\rmiddle\\t0.0\\n\\n")
+                        sys.stdout.flush()
+                        continue
+                    if mode == "extra_output":
+                        sys.stdout.write(
+                            f"{surface}\\t{surface}<n><nom>\\t0.0\\n\\n"
+                            f"{surface}\\t{surface}<adj>\\t0.0\\n"
+                        )
+                        sys.stdout.flush()
+                        continue
+                    if mode == "unterminated":
+                        sys.stdout.write(f"{surface}\\t{surface}<n><nom>\\t0.0")
+                        sys.stdout.flush()
+                        continue
                     if mode == "cyclic":
                         sys.stdout.write(f"{surface}\\t{surface}<n><nom>\\t0.0\\n")
                         sys.stdout.write(f"{surface}\\t[...cyclic...]\\t0.0\\n\\n")
@@ -132,10 +161,144 @@ class PersistentGuesserTests(unittest.TestCase):
             self.counter,
         )
         self.guesser = OpenClassGuesser(self.backend)  # type: ignore[arg-type]
+        # Make the fake executable portable to the native Windows test runner:
+        # invoke the script through the active Python rather than relying on a
+        # POSIX shebang. Helper options belong after that script argument.
+        self.guesser._worker.command = (
+            sys.executable,
+            str(self.helper),
+            "--pipe-mode=both",
+        )
+        self.guesser._worker._windows_option_index = 2
 
     def tearDown(self) -> None:
         self.guesser.close()
         self.temporary.cleanup()
+
+    def test_windows_uses_bounded_one_shot_queries_instead_of_pipe_selectors(self) -> None:
+        with mock.patch("qazmorph.guesser.sys.platform", "win32"), mock.patch(
+            "qazmorph.guesser.selectors.DefaultSelector",
+            side_effect=AssertionError("Windows subprocess pipes are not selectable"),
+        ):
+            first = self.guesser._raw_lookup(
+                "алмасөз", max_lines=8, timeout=2.0
+            )
+            second = self.guesser._raw_lookup(
+                "басқасөз", max_lines=8, timeout=2.0
+            )
+        self.assertEqual(len(first), 4)
+        self.assertEqual(len(second), 4)
+        self.assertEqual(self.counter.read_text(encoding="utf-8").count("started"), 2)
+        self.assertEqual(self.guesser.diagnostics["worker_starts"], 2)
+
+    def test_windows_one_shot_passes_a_plus_one_completeness_sentinel(self) -> None:
+        command = self.guesser._worker._windows_oneshot_command(max_lines=7)
+        self.assertEqual(
+            command[:4],
+            [sys.executable, str(self.helper), "-n", "8"],
+        )
+        with mock.patch("qazmorph.guesser.sys.platform", "win32"):
+            lines = self.guesser._worker._query_windows_oneshot(
+                "сөз", max_lines=7, timeout=2.0, max_bytes=4096
+            )
+
+        self.assertIn("--pipe-mode=both", command)
+        self.assertEqual(len(lines), 4)
+
+    def test_windows_one_shot_timeout_terminates_the_helper(self) -> None:
+        self.mode_file.write_text("timeout", encoding="utf-8")
+        with mock.patch("qazmorph.guesser.sys.platform", "win32"):
+            with self.assertRaisesRegex(BackendError, "timed out"):
+                self.guesser._raw_lookup("баяусөз", timeout=0.1)
+        self.assertEqual(self.guesser.diagnostics["idle_restarts"], 1)
+        self.assertEqual(self.guesser.diagnostics["oneshot_reaps"], 1)
+        self.assertIsNone(self.guesser._worker._process)
+
+    def test_windows_one_shot_retries_strict_utf8_protocol_failure_once(self) -> None:
+        self.mode_file.write_text("invalid_utf8_once", encoding="utf-8")
+        with mock.patch("qazmorph.guesser.sys.platform", "win32"):
+            lines = self.guesser._raw_lookup("қаталсөз", timeout=2.0)
+
+        self.assertEqual(len(lines), 4)
+        self.assertEqual(self.guesser.diagnostics["protocol_restarts"], 1)
+        self.assertEqual(
+            self.counter.read_text(encoding="utf-8").splitlines(),
+            ["started", "started"],
+        )
+
+    def test_windows_one_shot_rejects_non_lf_controls_and_extra_output(self) -> None:
+        with mock.patch("qazmorph.guesser.sys.platform", "win32"):
+            for mode in ("invalid_utf8", "bare_cr", "extra_output", "unterminated"):
+                with self.subTest(mode=mode):
+                    self.mode_file.write_text(mode, encoding="utf-8")
+                    with self.assertRaisesRegex(
+                        BackendError, "protocol could not correlate"
+                    ):
+                        self.guesser._raw_lookup("ақаусөз", timeout=2.0)
+
+    def test_windows_one_shot_caps_discard_every_partial_candidate(self) -> None:
+        with mock.patch("qazmorph.guesser.sys.platform", "win32"):
+            with self.assertRaisesRegex(BackendError, "byte cap.*partial.*discarded"):
+                self.guesser._raw_lookup(
+                    "көлемсөз", max_lines=8, max_bytes=32, timeout=2.0
+                )
+            with self.assertRaisesRegex(BackendError, "line cap.*partial.*discarded"):
+                self.guesser._raw_lookup(
+                    "жолсөз", max_lines=2, max_bytes=4096, timeout=2.0
+                )
+
+        self.assertEqual(self.guesser.diagnostics["cap_aborts"], 2)
+
+    def test_windows_hard_stdout_cap_never_caches_partial_candidates(self) -> None:
+        self.mode_file.write_text("stdout_flood", encoding="utf-8")
+        with mock.patch("qazmorph.guesser.sys.platform", "win32"):
+            with self.assertWarnsRegex(RuntimeWarning, "byte cap.*partial.*discarded"):
+                self.assertEqual(self.guesser.guess("тасқынсөз"), [])
+            starts = self.guesser.diagnostics["worker_starts"]
+            with warnings.catch_warnings(record=True) as repeated:
+                warnings.simplefilter("always")
+                self.assertEqual(self.guesser.guess("тасқынсөз"), [])
+
+        self.assertEqual(repeated, [])
+        self.assertEqual(self.guesser.diagnostics["worker_starts"], starts)
+        self.assertEqual(self.guesser.diagnostics["oneshot_reaps"], 1)
+        self.assertEqual(self.guesser._cache[("тасқынсөз", 8, False)], ())
+
+    def test_windows_hard_stderr_cap_reaps_helper_and_recovers(self) -> None:
+        self.mode_file.write_text("stderr_flood", encoding="utf-8")
+        with mock.patch("qazmorph.guesser.sys.platform", "win32"):
+            with self.assertRaisesRegex(BackendError, "stderr byte cap"):
+                self.guesser._raw_lookup("диагсөз", timeout=2.0)
+            self.mode_file.write_text("normal", encoding="utf-8")
+            self.assertEqual(
+                len(self.guesser._raw_lookup("жаңасөз", timeout=2.0)),
+                4,
+            )
+
+        self.assertEqual(self.guesser.diagnostics["oneshot_reaps"], 2)
+        self.assertIsNone(self.guesser._worker._process)
+
+    def test_windows_reader_start_failure_still_reaps_helper(self) -> None:
+        original_start = threading.Thread.start
+        calls = 0
+
+        def fail_second_start(thread: threading.Thread) -> None:
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise RuntimeError("deliberate reader start failure")
+            original_start(thread)
+
+        with mock.patch(
+            "qazmorph.guesser.threading.Thread.start",
+            autospec=True,
+            side_effect=fail_second_start,
+        ), mock.patch("qazmorph.guesser.sys.platform", "win32"):
+            with self.assertRaisesRegex(BackendError, "reader could not start"):
+                self.guesser._raw_lookup("жіпсөз", timeout=2.0)
+
+        self.assertEqual(self.guesser.diagnostics["oneshot_reaps"], 1)
+        self.assertIsNone(self.guesser._worker._process)
 
     def test_worker_is_reused_across_complete_responses(self) -> None:
         first = self.guesser._raw_lookup("алмасөз", max_lines=8, timeout=2.0)

@@ -14,6 +14,20 @@
         "bytes": 10679,
         "sha256": "bb84ef3fc227fd24c78e4b8f25caa26f365a5f9497aaa76a7ec2d5d49836ee72"
       }
+    },
+    {
+      "platform": {
+        "system": "linux",
+        "machine": "x86_64"
+      },
+      "resource_bundle_ids": [
+        "f03e703d3e2a67044a7d91fd7d575b92cb4e61aa782fb67cff91b0a5ff0ebd5a"
+      ],
+      "bundle_id": "39a01ea673d024b0d6080739b5bb23c76daf0f7ed7bdb95dd1157d9dce4b627e",
+      "manifest": {
+        "bytes": 9958,
+        "sha256": "67da829d117d39d7de34afbc67dd649be24156fa9fab613aa318b438b9637f4b"
+      }
     }
   ]
 }

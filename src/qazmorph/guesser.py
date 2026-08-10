@@ -8,6 +8,7 @@ import math
 import os
 import selectors
 import subprocess
+import sys
 import threading
 import time
 from typing import Literal, Mapping, Sequence
@@ -25,6 +26,8 @@ KAZAKH_CYRILLIC = frozenset("аәбвгғдеёжзийкқлмнңоөпрст�
 MAX_GUESS_SURFACE_LENGTH = 32
 GUESS_CACHE_CAPACITY = 8192
 CYCLE_MARKER = "[...cyclic...]"
+WINDOWS_STDERR_BYTE_CAP = 65_536
+WINDOWS_PIPE_READ_CHUNK = 65_536
 STEM_FINAL_ALTERNATIONS = frozenset(
     {
         ("б", "п"),
@@ -58,6 +61,12 @@ class _LookupTimeout(BackendError):
 
 
 class _LookupFailure(BackendError):
+    pass
+
+
+class _LookupProtocolFailure(_LookupFailure):
+    """A complete process response that violates the HFST wire grammar."""
+
     pass
 
 
@@ -110,6 +119,11 @@ class _PersistentLookupWorker:
         self.cycle_truncation_count = 0
         self.idle_restart_count = 0
         self.protocol_restart_count = 0
+        self.oneshot_reap_count = 0
+        # Production helpers accept options immediately after argv[0]. Tests
+        # may run a Python script explicitly and move this insertion point
+        # past the interpreter and script path.
+        self._windows_option_index = 1
 
     def _ensure_process_identity(self) -> None:
         # A lock held by another thread at fork remains permanently locked in
@@ -281,6 +295,13 @@ class _PersistentLookupWorker:
 
         self._ensure_process_identity()
         with self._lock:
+            if sys.platform == "win32":
+                return self._query_windows_oneshot(
+                    surface,
+                    max_lines=max_lines,
+                    timeout=timeout,
+                    max_bytes=max_bytes,
+                )
             process = self._start()
             assert process.stdin is not None and process.stdout is not None
             try:
@@ -412,6 +433,366 @@ class _PersistentLookupWorker:
             finally:
                 selector.close()
 
+    def _query_windows_oneshot(
+        self,
+        surface: str,
+        *,
+        max_lines: int,
+        timeout: float,
+        max_bytes: int,
+    ) -> list[str]:
+        """Use a bounded fresh HFST process where pipe selectors are invalid.
+
+        CPython's Windows selector accepts sockets, not anonymous subprocess
+        pipes.  A blocking selector around ``hfst-optimized-lookup`` would
+        therefore fail with ``WSAENOTSOCK``. Keeping HFST pipe mode is required
+        for redirected stdin on Windows; closing stdin after one query supplies
+        an unambiguous EOF boundary and the bounded runner supplies a strong
+        process-level timeout. It is intentionally less optimized than the
+        POSIX persistent worker, but preserves correctness and cleanup.
+        """
+
+        command = self._windows_oneshot_command(max_lines=max_lines)
+
+        self._stderr_buffer.clear()
+        self.start_count += 1
+        try:
+            completed = self._run_windows_bounded(
+                command,
+                input=(surface + "\n").encode("utf-8"),
+                timeout=timeout,
+                max_stdout_bytes=max_bytes,
+            )
+        except subprocess.TimeoutExpired as exc:
+            self.idle_restart_count += 1
+            raise _LookupTimeout(
+                f"HFST guesser lookup for {surface!r} timed out after {timeout:.3f}s; "
+                "partial response discarded"
+            ) from exc
+        if completed.returncode:
+            detail = self._stderr_buffer.decode(
+                "utf-8", errors="replace"
+            ).strip()
+            suffix = f": {detail}" if detail else ""
+            raise _LookupFailure(
+                f"HFST guesser lookup exited with status {completed.returncode} "
+                f"before completing a response{suffix}"
+            )
+        return self._parse_windows_oneshot_response(
+            completed.stdout,
+            max_lines=max_lines,
+            max_bytes=max_bytes,
+        )
+
+    def _windows_oneshot_command(self, *, max_lines: int) -> list[str]:
+        base_command = list(self.command)
+        # Both hfst-optimized-lookup (``--analyses``) and hfst-lookup
+        # (``--max-number``) spell their result bound ``-n``. Request one
+        # candidate beyond the public prefix: its presence is a completeness
+        # sentinel that makes the parser fail closed instead of caching a
+        # silently truncated lattice. The exact Project.JJ executables are
+        # probed for this option on the native Windows runner.
+        option_index = min(self._windows_option_index, len(base_command))
+        command = [
+            *base_command[:option_index],
+            "-n",
+            str(max_lines + 1),
+            *base_command[option_index:],
+        ]
+        return command
+
+    def _run_windows_bounded(
+        self,
+        command: Sequence[str],
+        *,
+        input: bytes,
+        timeout: float,
+        max_stdout_bytes: int,
+    ) -> subprocess.CompletedProcess[bytes]:
+        """Run one helper with hard in-memory pipe bounds and guaranteed reap.
+
+        Windows anonymous pipes cannot be consumed with ``selectors``. Two
+        reader threads keep stdout and stderr independent so either stream can
+        fill without deadlocking the child. The stdout reader retains at most
+        ``max_stdout_bytes + 1`` bytes and stderr retains only the existing
+        8-KiB diagnostic ring while counting up to a fixed hard cap. Crossing
+        either boundary signals the owner thread to terminate and reap the
+        process; no partial payload is returned to the protocol parser.
+        """
+
+        started = time.monotonic()
+        try:
+            process = subprocess.Popen(
+                command,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=self.environment,
+                bufsize=0,
+            )
+        except OSError as exc:
+            raise _LookupFailure(f"HFST guesser lookup could not start: {exc}") from exc
+
+        assert process.stdin is not None
+        assert process.stdout is not None
+        assert process.stderr is not None
+        stop_requested = threading.Event()
+        stdout_chunks: list[bytes] = []
+        failures: list[tuple[str, BaseException | None]] = []
+
+        def fail(kind: str, error: BaseException | None = None) -> None:
+            failures.append((kind, error))
+            stop_requested.set()
+
+        def read_stdout() -> None:
+            retained = 0
+            try:
+                while True:
+                    request = min(
+                        WINDOWS_PIPE_READ_CHUNK,
+                        max_stdout_bytes + 1 - retained,
+                    )
+                    if request <= 0:
+                        fail("stdout-cap")
+                        return
+                    chunk = process.stdout.read(request)
+                    if not chunk:
+                        return
+                    stdout_chunks.append(chunk)
+                    retained += len(chunk)
+                    if retained > max_stdout_bytes:
+                        fail("stdout-cap")
+                        return
+            except (OSError, ValueError) as exc:
+                fail("stdout-read", exc)
+
+        def read_stderr() -> None:
+            observed = 0
+            try:
+                while True:
+                    request = min(
+                        WINDOWS_PIPE_READ_CHUNK,
+                        WINDOWS_STDERR_BYTE_CAP + 1 - observed,
+                    )
+                    if request <= 0:
+                        fail("stderr-cap")
+                        return
+                    chunk = process.stderr.read(request)
+                    if not chunk:
+                        return
+                    observed += len(chunk)
+                    self._remember_stderr(chunk)
+                    if observed > WINDOWS_STDERR_BYTE_CAP:
+                        fail("stderr-cap")
+                        return
+            except (OSError, ValueError) as exc:
+                fail("stderr-read", exc)
+
+        readers = [
+            threading.Thread(target=read_stdout, name="kazstem-hfst-stdout", daemon=True),
+            threading.Thread(target=read_stderr, name="kazstem-hfst-stderr", daemon=True),
+        ]
+        started_readers: list[threading.Thread] = []
+        timed_out = False
+        input_error: BaseException | None = None
+        try:
+            try:
+                for reader in readers:
+                    reader.start()
+                    started_readers.append(reader)
+            except RuntimeError as exc:
+                raise _LookupFailure(
+                    f"HFST guesser lookup pipe reader could not start: {exc}"
+                ) from exc
+            try:
+                process.stdin.write(input)
+                process.stdin.close()
+            except (BrokenPipeError, OSError, ValueError) as exc:
+                input_error = exc
+
+            deadline = started + timeout
+            while process.poll() is None and not stop_requested.is_set():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    timed_out = True
+                    break
+                stop_requested.wait(min(remaining, 0.02))
+
+            if timed_out or stop_requested.is_set():
+                self._terminate_and_reap(process)
+            else:
+                process.wait()
+
+            for reader in started_readers:
+                reader.join(timeout=1.0)
+            if any(reader.is_alive() for reader in started_readers):
+                self._terminate_and_reap(process)
+                fail("reader-cleanup")
+                for stream in (process.stdout, process.stderr):
+                    try:
+                        stream.close()
+                    except OSError:
+                        pass
+                for reader in started_readers:
+                    reader.join(timeout=0.5)
+            if any(reader.is_alive() for reader in started_readers):
+                raise _LookupFailure(
+                    "HFST guesser lookup pipe reader did not stop after process cleanup"
+                )
+        finally:
+            if process.poll() is None:
+                self._terminate_and_reap(process)
+            else:
+                process.wait()
+            for reader in started_readers:
+                reader.join(timeout=0.5)
+            lingering_readers = [
+                reader for reader in started_readers if reader.is_alive()
+            ]
+            if lingering_readers:
+                for stream in (process.stdout, process.stderr):
+                    try:
+                        stream.close()
+                    except (OSError, ValueError):
+                        pass
+                for reader in lingering_readers:
+                    reader.join(timeout=0.5)
+            self._close_streams(process)
+            self.oneshot_reap_count += 1
+            if any(reader.is_alive() for reader in started_readers):
+                raise _LookupFailure(
+                    "HFST guesser lookup pipe reader survived process cleanup"
+                )
+
+        if timed_out:
+            raise subprocess.TimeoutExpired(command, timeout)
+        kinds = {kind for kind, _error in failures}
+        if "stdout-cap" in kinds:
+            self.cap_abort_count += 1
+            raise _LookupFailure(
+                "HFST guesser lookup exceeded the byte cap; partial response discarded"
+            )
+        if "stderr-cap" in kinds:
+            raise _LookupFailure(
+                "HFST guesser lookup exceeded the stderr byte cap; response discarded"
+            )
+        if failures:
+            kind, error = failures[0]
+            raise _LookupFailure(
+                f"HFST guesser lookup {kind.replace('-', ' ')} failed: {error}"
+            ) from error
+        if input_error is not None and process.returncode == 0:
+            raise _LookupFailure(
+                f"HFST guesser lookup input pipe failed: {input_error}"
+            ) from input_error
+        return subprocess.CompletedProcess(
+            args=list(command),
+            returncode=process.returncode,
+            stdout=b"".join(stdout_chunks),
+            stderr=bytes(self._stderr_buffer),
+        )
+
+    @staticmethod
+    def _terminate_and_reap(process: subprocess.Popen[bytes]) -> None:
+        if process.poll() is not None:
+            process.wait()
+            return
+        try:
+            process.terminate()
+        except OSError:
+            pass
+        try:
+            process.wait(timeout=0.25)
+            return
+        except subprocess.TimeoutExpired:
+            pass
+        try:
+            process.kill()
+        except OSError:
+            pass
+        try:
+            process.wait(timeout=1.0)
+        except subprocess.TimeoutExpired as exc:
+            raise _LookupFailure(
+                "HFST guesser lookup process could not be reaped after termination"
+            ) from exc
+
+    def _parse_windows_oneshot_response(
+        self,
+        payload: bytes,
+        *,
+        max_lines: int,
+        max_bytes: int,
+    ) -> list[str]:
+        """Parse one EOF-bounded HFST response without accepting partial data.
+
+        Only LF records with an optional immediately preceding CR are valid.
+        Python's ``bytes.splitlines`` recognizes additional control characters
+        as separators and replacement decoding hides corrupt output, so both
+        are deliberately avoided here.  Unlike the persistent POSIX prefix
+        cap, a one-shot response is already fully available: exceeding either
+        cap fails closed instead of returning candidates from an incomplete
+        prefix that could enter the OOV cache.
+        """
+
+        if len(payload) > max_bytes:
+            self.cap_abort_count += 1
+            raise _LookupFailure(
+                "HFST guesser lookup exceeded the byte cap; partial response "
+                "discarded"
+            )
+        if payload and not payload.endswith(b"\n"):
+            raise _LookupProtocolFailure(
+                "one-shot HFST response is not terminated by LF"
+            )
+
+        raw_records = payload[:-1].split(b"\n") if payload else []
+        lines: list[str] = []
+        for index, raw_line in enumerate(raw_records):
+            if raw_line.endswith(b"\r"):
+                raw_line = raw_line[:-1]
+            if b"\r" in raw_line:
+                raise _LookupProtocolFailure(
+                    "one-shot HFST response contains a bare CR"
+                )
+            if not raw_line:
+                if index != len(raw_records) - 1:
+                    raise _LookupProtocolFailure(
+                        "one-shot HFST response has output after its blank terminator"
+                    )
+                break
+            if any(
+                (value < 0x20 and value != 0x09) or value == 0x7F
+                for value in raw_line
+            ):
+                raise _LookupProtocolFailure(
+                    "one-shot HFST response contains an ASCII control byte"
+                )
+            try:
+                decoded_line = raw_line.decode("utf-8", errors="strict")
+            except UnicodeDecodeError as exc:
+                raise _LookupProtocolFailure(
+                    "one-shot HFST response is not valid UTF-8"
+                ) from exc
+            if any(
+                character != "\t"
+                and unicodedata.category(character) in {"Cc", "Cs", "Zl", "Zp"}
+                for character in decoded_line
+            ):
+                raise _LookupProtocolFailure(
+                    "one-shot HFST response contains a Unicode control or separator"
+                )
+            if len(lines) >= max_lines:
+                self.cap_abort_count += 1
+                raise _LookupFailure(
+                    "HFST guesser lookup exceeded the line cap; partial response "
+                    "discarded"
+                )
+            if CYCLE_MARKER in decoded_line:
+                self.cycle_truncation_count += 1
+            lines.append(decoded_line)
+        return lines
+
 
 class OpenClassGuesser:
     """Query a deliberately overgenerating FST and retain a safe finite prefix."""
@@ -502,6 +883,7 @@ class OpenClassGuesser:
                 "cycle_truncations": self._worker.cycle_truncation_count,
                 "idle_restarts": self._worker.idle_restart_count,
                 "protocol_restarts": self._worker.protocol_restart_count,
+                "oneshot_reaps": self._worker.oneshot_reap_count,
                 "productive_resource_safe": int(self._productive_safe),
             }
 
@@ -529,13 +911,16 @@ class OpenClassGuesser:
             return []
         first_problem: str | None = None
         for attempt in range(2):
-            lines = self._worker.query(
-                surface,
-                max_lines=max_lines,
-                timeout=timeout,
-                max_bytes=max_bytes,
-            )
-            problem = self._response_protocol_problem(surface, lines)
+            try:
+                lines = self._worker.query(
+                    surface,
+                    max_lines=max_lines,
+                    timeout=timeout,
+                    max_bytes=max_bytes,
+                )
+                problem = self._response_protocol_problem(surface, lines)
+            except _LookupProtocolFailure as exc:
+                problem = str(exc)
             if problem is None:
                 return lines
             if attempt == 0:

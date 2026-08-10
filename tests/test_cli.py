@@ -41,13 +41,13 @@ class CliCompatibilityTests(unittest.TestCase):
             start = end
         return Document(text, tokens, "lattice", "test")
 
-    def test_public_and_package_versions_are_0_2_2(self) -> None:
+    def test_public_and_package_versions_are_0_2_3(self) -> None:
         project = (
             Path(__file__).resolve().parents[1] / "pyproject.toml"
         ).read_text(
             encoding="utf-8"
         )
-        self.assertEqual(__version__, "0.2.2")
+        self.assertEqual(__version__, "0.2.3")
         self.assertIn(f'version = "{__version__}"', project)
 
     def test_unix_short_options_can_be_clustered(self) -> None:

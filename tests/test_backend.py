@@ -10,6 +10,7 @@ from unittest import mock
 
 from qazmorph.backend import (
     _hyphen_chains,
+    _integrity_seal_status,
     BackendError,
     escape_apertium_text,
     FSTBackend,
@@ -389,6 +390,64 @@ class ResourceManifestTests(unittest.TestCase):
             self.assertTrue(sealed["sealed_read_only"])
             self.assertEqual(sealed["writable_entries"], 0)
             self.assertEqual(sealed["writable_directories"], 0)
+
+    def test_windows_integrity_seal_uses_fresh_hashes_not_posix_directory_bits(self) -> None:
+        with mock.patch("qazmorph.backend.sys.platform", "win32"):
+            observed = _integrity_seal_status(
+                verified=True,
+                manifest_read_only=False,
+                root_read_only=False,
+                writable_entries=7,
+                writable_directories=3,
+                content_rehashed=True,
+            )
+        self.assertEqual(
+            observed["seal_model"],
+            "windows-complete-inventory-force-rehash-v1",
+        )
+        self.assertFalse(observed["directory_modes_enforced"])
+        self.assertFalse(observed["sealed_read_only"])
+        self.assertTrue(observed["integrity_seal_verified"])
+
+    def test_windows_integrity_seal_never_accepts_a_cached_or_partial_inventory(self) -> None:
+        for verified, content_rehashed in ((False, True), (True, False)):
+            with self.subTest(
+                verified=verified, content_rehashed=content_rehashed
+            ), mock.patch("qazmorph.backend.sys.platform", "win32"):
+                observed = _integrity_seal_status(
+                    verified=verified,
+                    manifest_read_only=True,
+                    root_read_only=True,
+                    writable_entries=0,
+                    writable_directories=0,
+                    content_rehashed=content_rehashed,
+                )
+            self.assertFalse(observed["integrity_seal_verified"])
+
+    def test_windows_complete_rehash_can_be_official_with_writable_zip_directories(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            resource_dir = root / "resources"
+            resource_dir.mkdir()
+            manifest = self.write_resource_manifest(
+                resource_dir, RESOURCE_MANIFEST_V3
+            )
+            backend = self.runtime_backend(resource_dir, manifest, root / "toolchain")
+
+            with mock.patch("qazmorph.backend.sys.platform", "win32"):
+                provenance = backend.runtime_provenance()
+
+            self.assertTrue(provenance["official"])
+            self.assertTrue(
+                provenance["resource_inventory"]["integrity_seal_verified"]
+            )
+            self.assertTrue(
+                provenance["toolchain_inventory"]["integrity_seal_verified"]
+            )
+            self.assertTrue(provenance["toolchain_inventory"]["content_rehashed"])
+            self.assertFalse(
+                provenance["toolchain_inventory"]["sealed_read_only"]
+            )
 
     def test_v3_runtime_requires_a_sealed_resource_bundle(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

@@ -50,6 +50,48 @@ RESOURCE_FILES_BY_SCHEMA = {
 }
 
 
+def _integrity_seal_status(
+    *,
+    verified: bool,
+    manifest_read_only: bool,
+    root_read_only: bool,
+    writable_entries: int,
+    writable_directories: int,
+    content_rehashed: bool,
+) -> dict[str, Any]:
+    """Describe the host-appropriate integrity seal for an inventory.
+
+    POSIX mode bits can make both files and directories read-only and remain
+    part of the existing official-release contract.  Windows directory
+    ``READONLY`` attributes do not deny creation or replacement, and ZIP ACLs
+    are not portable.  Treating their synthetic ``st_mode`` bits as a POSIX
+    seal would therefore be false assurance.  On Windows the equivalent gate
+    is an exact, complete inventory whose regular files were freshly rehashed;
+    this also deliberately disables the process-local hash cache.
+    """
+
+    sealed_read_only = bool(
+        verified
+        and manifest_read_only
+        and root_read_only
+        and writable_entries == 0
+        and writable_directories == 0
+    )
+    if sys.platform == "win32":
+        return {
+            "seal_model": "windows-complete-inventory-force-rehash-v1",
+            "directory_modes_enforced": False,
+            "sealed_read_only": False,
+            "integrity_seal_verified": bool(verified and content_rehashed),
+        }
+    return {
+        "seal_model": "posix-read-only-complete-inventory-v1",
+        "directory_modes_enforced": True,
+        "sealed_read_only": sealed_read_only,
+        "integrity_seal_verified": sealed_read_only,
+    }
+
+
 def _protected_sentinel(character: str) -> str:
     return f"[QAZMORPH-U{ord(character):06X}]"
 
@@ -442,12 +484,13 @@ class FSTBackend:
             and artifacts_match
             and regular_artifacts == len(required_files)
         )
-        sealed_read_only = bool(
-            verified
-            and root_read_only
-            and manifest_read_only
-            and writable_entries == 0
-            and writable_directories == 0
+        seal = _integrity_seal_status(
+            verified=verified,
+            manifest_read_only=manifest_read_only,
+            root_read_only=root_read_only,
+            writable_entries=writable_entries,
+            writable_directories=writable_directories,
+            content_rehashed=True,
         )
         return {
             "verified": verified,
@@ -462,7 +505,7 @@ class FSTBackend:
             "writable_directories": writable_directories,
             "missing_entries": missing_entries,
             "unexpected_entries": unexpected_entries,
-            "sealed_read_only": sealed_read_only,
+            **seal,
             "verification_scope": "complete resource bundle",
         }
 
@@ -728,7 +771,7 @@ class FSTBackend:
             bool(path.stat().st_mode & 0o222) for path in directories
         )
         root_read_only = not bool(root_stat.st_mode & 0o222)
-        sealed_read_only = (
+        posix_sealed_read_only = bool(
             manifest_read_only
             and root_read_only
             and writable_entries == 0
@@ -738,7 +781,8 @@ class FSTBackend:
         frozen_fingerprint = tuple(fingerprint)
         content_rehashed = bool(
             force_rehash
-            or not sealed_read_only
+            or sys.platform == "win32"
+            or not posix_sealed_read_only
             or self._verified_toolchain_inventories.get(cache_key) != frozen_fingerprint
         )
         if content_rehashed:
@@ -748,10 +792,19 @@ class FSTBackend:
                     raise BackendError(
                         f"Bound toolchain file checksum failed: {relative_name}"
                     )
-            if sealed_read_only:
+            if posix_sealed_read_only and sys.platform != "win32":
                 self._verified_toolchain_inventories[cache_key] = frozen_fingerprint
             else:
                 self._verified_toolchain_inventories.pop(cache_key, None)
+
+        seal = _integrity_seal_status(
+            verified=True,
+            manifest_read_only=manifest_read_only,
+            root_read_only=root_read_only,
+            writable_entries=writable_entries,
+            writable_directories=writable_directories,
+            content_rehashed=content_rehashed,
+        )
 
         return {
             "verified": True,
@@ -763,7 +816,7 @@ class FSTBackend:
             "root_read_only": root_read_only,
             "writable_entries": writable_entries,
             "writable_directories": writable_directories,
-            "sealed_read_only": sealed_read_only,
+            **seal,
             "verification_scope": "complete extracted toolchain bundle",
             "force_rehash": force_rehash,
             "content_rehashed": content_rehashed,
@@ -889,6 +942,7 @@ class FSTBackend:
                     **dict(self._toolchain_inventory),
                     "verified": False,
                     "sealed_read_only": False,
+                    "integrity_seal_verified": False,
                     "force_rehash": True,
                     "content_rehashed": True,
                     "error": verification_error,
@@ -898,6 +952,7 @@ class FSTBackend:
                 **dict(self._toolchain_inventory),
                 "verified": False,
                 "sealed_read_only": False,
+                "integrity_seal_verified": False,
                 "force_rehash": True,
                 "content_rehashed": False,
                 "error": verification_error,
@@ -998,6 +1053,7 @@ class FSTBackend:
                 **inventory,
                 "verified": False,
                 "sealed_read_only": False,
+                "integrity_seal_verified": False,
                 "error": verification_error,
             }
 
@@ -1025,21 +1081,40 @@ class FSTBackend:
                 non_official_reasons.append(
                     "resource v3 has no verified finite-guesser proof"
                 )
-            if verification_error is None and not inventory.get("sealed_read_only"):
-                non_official_reasons.append(
-                    (
-                        "resource v3 bound toolchain is not sealed read-only"
-                        if toolchain_origin == "resource-bound-toolchain"
-                        else "resource v3 active platform runtime is not sealed read-only"
+            if verification_error is None and not inventory.get(
+                "integrity_seal_verified",
+                inventory.get("sealed_read_only"),
+            ):
+                if sys.platform == "win32":
+                    non_official_reasons.append(
+                        (
+                            "resource v3 bound toolchain integrity seal is not verified"
+                            if toolchain_origin == "resource-bound-toolchain"
+                            else "resource v3 active platform runtime integrity seal is not verified"
+                        )
                     )
-                )
+                else:
+                    non_official_reasons.append(
+                        (
+                            "resource v3 bound toolchain is not sealed read-only"
+                            if toolchain_origin == "resource-bound-toolchain"
+                            else "resource v3 active platform runtime is not sealed read-only"
+                        )
+                    )
             if not resource_inventory.get("verified"):
                 non_official_reasons.append(
                     "resource v3 bundle inventory is not completely verified"
                 )
-            elif not resource_inventory.get("sealed_read_only"):
+            elif not resource_inventory.get(
+                "integrity_seal_verified",
+                resource_inventory.get("sealed_read_only"),
+            ):
                 non_official_reasons.append(
-                    "resource v3 bundle is not sealed read-only"
+                    (
+                        "resource v3 bundle integrity seal is not verified"
+                        if sys.platform == "win32"
+                        else "resource v3 bundle is not sealed read-only"
+                    )
                 )
         if sys.platform.startswith("linux"):
             if getattr(self, "_ambient_library_path", None):

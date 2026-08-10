@@ -6,7 +6,7 @@ on:
       tag:
         description: Existing GitHub release tag whose audited assets will be published
         required: true
-        default: v0.2.2
+        default: v0.2.3
 
 permissions:
   contents: read

@@ -27,7 +27,7 @@ They use the locked source commit timestamp rather than wall-clock build time,
 so two byte-identical builds have the same manifest and content address. The
 runtime verifies the resource hashes before loading.
 
-## macOS arm64 detached runtime (0.2.2)
+## macOS arm64 detached runtime (0.2.3)
 
 The macOS arm64 binary asset uses the unchanged f03e `apertium-kaz` resource
 bundle above, but does not claim that f03e was built by the macOS tools. The
@@ -45,7 +45,7 @@ The only native input archives are the following Apertium Project.JJ artifacts:
 HFST's archive is not independently closed: its foma library loads
 `@rpath/libz.1.dylib`, which is supplied by the pinned CG-3 archive. KazStem
 therefore verifies and treats the minimal merged dependency set as one runtime
-bundle. It includes four command entry points, their complete non-system Mach-O
+bundle. It includes three command entry points, their complete non-system Mach-O
 closure, and no compilation tools or neural-model weights.
 
 | Redistributed component | Exact source/version | License / notice |
@@ -67,6 +67,36 @@ source archives described by the source lock. Apple `libSystem` and `libc++`
 are host System Libraries and are not copied into the archive. The native
 executables carry upstream ad-hoc/linker signatures only; they have no Team ID
 and the CLI archive is not Developer-ID signed or notarized.
+
+## Windows x86-64 detached runtime (0.2.3)
+
+The Windows asset uses the same unchanged f03e resource bundle and a separate
+manifest-bound Project.JJ runtime. The exact original inputs are:
+
+| Archive | Bytes | SHA-256 |
+|---|---:|---|
+| [`hfst-3.17.2+g4028~e16268eb.x86_64.zip`](https://apertium.projectjj.com/windows/nightly/x86_64/hfst-3.17.2+g4028~e16268eb.x86_64.zip) | 21,970,467 | `a28df94fd80d3d6fe2401f5d71c31b96fad7c01c973e2b26c539ce1016e4542e` |
+| [`cg3-1.6.8+g2347~8d5fa4dd.x86_64.zip`](https://apertium.projectjj.com/windows/nightly/x86_64/cg3-1.6.8+g2347~8d5fa4dd.x86_64.zip) | 16,333,576 | `6df5801f2dfec584822b68ade4f3d25618cdfdad6cb0a1fb3704364c9a10c45b` |
+
+The candidate pipeline selects the three required executables and derives the
+smallest non-system DLL set recursively reached by their ordinary or
+delay-load PE imports. The real Windows runner must bind the final file count,
+prove every retained PE is AMD64, and reject any dependency outside the
+checked policy. Duplicate ICU/GCC runtime DLLs in the two inputs must be
+byte-identical before they are coalesced. Candidate components include
+HFST/libhfst, CG-3/libcg3, foma, OpenFst, ICU 74.2, Readline
+8.2, GNU Termcap 1.3.1, SQLite 3.46.0, zlib 1.3.1, dlfcn-win32 1.4.1, GCC
+13.3 runtime libraries, and MinGW-w64 12.0.0 runtime components under the
+licenses recorded in
+`scripts/platform_runtime_sources.windows-x86_64.lock.json`. That lock also
+binds every corresponding-source archive and the MXE/Apertium build recipes.
+
+The checked dependency policy permits `advapi32.dll`, `kernel32.dll`,
+`msvcrt.dll`, and `user32.dll` as the Windows system boundary; the native audit
+must record the subset actually observed. These DLLs are not redistributed.
+OpenSSL, `_ssl`,
+`_hashlib`, libssl, and libcrypto are absent. The ZIP is not Authenticode-signed
+and makes no publisher-reputation or SmartScreen-bypass claim.
 
 The optional neural lock verifies the `uv` executable, exact model bytes,
 project-source bytes, the Python/Torch/CUDA values declared by the lock, and

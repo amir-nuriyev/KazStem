@@ -1,6 +1,6 @@
 # macOS arm64 ready-run recipe
 
-This recipe builds the unsigned/not-notarized KazStem 0.2.2 CLI asset tested on
+This recipe builds the unsigned/not-notarized KazStem 0.2.3 CLI asset tested on
 macOS 15 arm64. It never changes or relabels the f03e resource bytes.
 
 Build the checked-in source twice at `SOURCE_DATE_EPOCH=1786361661`, require

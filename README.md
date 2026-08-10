@@ -154,9 +154,12 @@ and returns explicit unknowns instead. Manifest v3 bundles require the embedded
 finite-relation proof and use the optimized `.hfstol` guesser.
 
 Runtime verification re-hashes every compiled resource artifact and every file
-and symlink in the extracted HFST/CG toolchain. Official runs require both
-content-addressed bundles to be sealed read-only and reject an unverified
-executable override. It is not a byte-closed operating-system image: ELF
+and symlink in the extracted HFST/CG toolchain. Official POSIX runs require both
+content-addressed bundles to be sealed read-only; Windows ZIP extraction cannot
+portably preserve a directory ACL, so Windows uses a named complete-inventory
+contract that disables the hash cache and freshly re-hashes every runtime file.
+Both contracts reject an unverified executable override. It is not a
+byte-closed operating-system image: ELF
 dependencies supplied by the H100 host (for example libc and ICU) remain
 outside that manifest. Reports record this boundary as `byte_closed: false`,
 the host platform, and whether ambient `LD_LIBRARY_PATH`, `LD_PRELOAD`, or
@@ -165,7 +168,7 @@ rather than exposed.
 Legacy v2 resources remain usable through standard lookup, but are labeled
 non-official because their historical toolchain was not sealed read-only.
 
-Version 0.2.2 also supports a detached native runtime shipped beside an exact
+Version 0.2.3 also supports detached native runtimes shipped beside an exact
 resource bundle. `src/qazmorph/platform_runtime_assets.lock.json` binds the
 platform, resource bundle ID, native-runtime bundle ID, and manifest bytes.
 Selection never searches a user cache or ambient `PATH`: it is restricted to
@@ -173,10 +176,12 @@ the content-addressed `.qazmorph/platform-runtimes/` directory beside the
 verified resources and fails closed after a matching lock record exists. The
 f03e resource manifest remains byte-for-byte unchanged and continues to report
 the Ubuntu r4 toolchain that built it; runtime provenance separately reports
-the active macOS arm64 identity. macOS helpers use bundle-relative Mach-O
-rpaths, and ambient `DYLD_LIBRARY_PATH` or `DYLD_INSERT_LIBRARIES` makes a run
-non-official. Native assets are platform-specific and their release notes state
-the tested OS/architecture and signing status.
+the active platform identity. macOS helpers use bundle-relative Mach-O rpaths,
+Linux uses an audited Ubuntu 24.04 host boundary, and Windows keeps its complete
+non-system DLL closure beside the helper executables. Ambient loader injection
+makes a run non-official on platforms that expose it. Native assets are
+platform-specific and their release notes state the tested OS/architecture and
+signing status.
 
 For packaged source and Python-wheel downloads, see
 [GitHub Releases](https://github.com/amir-nuriyev/KazStem/releases). The wheel
@@ -411,7 +416,7 @@ BibTeX users can cite [CITATION.bib](CITATION.bib):
   author  = {Amir Nuriyev},
   title   = {KazStem: an ambiguity-preserving Kazakh morphological analyzer and generator},
   year    = {2026},
-  version = {0.2.2},
+  version = {0.2.3},
   url     = {https://github.com/amir-nuriyev/KazStem},
   license = {GPL-3.0-or-later}
 }

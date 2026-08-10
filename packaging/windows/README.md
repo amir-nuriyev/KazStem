@@ -1,0 +1,69 @@
+# Windows x86-64 ready-run recipe
+
+KazStem's Windows 0.2.3 asset is built and tested only on a real GitHub-hosted
+`windows-2022` runner. Cross-compiled or Wine-only results are not release
+evidence.
+The bootstrap therefore records Windows Server 2022 build 10.0.20348 as the
+tested floor and does not claim Windows 10 validation.
+
+The exact Project.JJ binary inputs and complete corresponding-source set are
+bound by `scripts/platform_runtime_sources.windows-x86_64.lock.json`.
+`build_runtime.py` validates every ZIP path, type, CRC, size, and digest;
+requires duplicate DLLs to be byte-identical; copies only three commands plus
+their recursively reached DLLs; executes the command version probes; binds the
+ordinary and delay-load PE graph into the runtime manifest; and emits a
+proposed unified package lock. The proposal is a bootstrap artifact, not a
+release: its exact Windows entry must be reviewed and checked in before the
+canonical wheel or any ready-run archive is built.
+
+The candidate native closure is deliberately flat under `usr/bin`, so Windows
+can resolve every non-system DLL beside the exact helper executable. The
+pipeline targets the three required commands and their smallest recursively
+reachable AMD64 DLL set; the real runner binds the final file count and proves
+that its only unbundled imports are explicitly allowlisted Windows system
+DLLs. There are no symlinks, installers, registry changes, services,
+administrator requirements, neural weights, network clients, or OpenSSL.
+
+Run the private inventory workflow first:
+
+```text
+.github/workflows/windows-runtime-inventory.yml
+```
+
+The workflow has `contents: read`, persists no checkout credentials, and can
+only upload a seven-day Actions artifact. It downloads locked inputs, runs
+source-side path/PE/seal tests, builds in two distinct roots, requires exact
+runtime and proposed-lock equality, rejects absolute runner paths in all
+textual evidence, and uploads the candidate runtime plus proposed lock for
+review. It never
+creates a tag or GitHub release.
+
+After the Windows entry is checked in, rebuild the one canonical 0.2.3 wheel
+and sdist, then rebuild Mac, Linux, and Windows from that same source identity.
+The Windows frozen launcher uses CPython 3.14.3, PyInstaller 6.22.0, and the
+checked `kazstem-minimal.spec`. The final release workflow must perform two
+from-scratch builds in distinct roots and require byte-identical normalized
+ZIP hashes.
+
+A fresh extraction outside the checkout must prove:
+
+1. `platform.machine()` and `AMD64` normalize to `x86_64`;
+2. all three native `.exe` files pass `os.access(path, os.X_OK)` and execute
+   without modifying `PATH`, installing software, or requiring elevation;
+3. the manifest-bound DLL closure resolves beside the helpers, with no missing,
+   ambiguous, PATH-sourced, non-AMD64, or unallowlisted import;
+4. the complete-inventory/forced-rehash Windows integrity contract reports
+   verified provenance while truthfully retaining `sealed_read_only=false`;
+5. MyStem text/JSON/XML envelopes, lossless JSONL, OOV, CG, generation, Unicode,
+   CRLF, literal NUL, CP1251, malformed encodings, hostile file paths, and
+   cleanup/no-lingering-process cases pass;
+6. repeated large practical workloads are deterministic and record timing and
+   peak working set without overstating cross-language performance;
+7. no `_ssl`, `_hashlib`, `libssl`, `libcrypto`, OpenSSL source, neural weight,
+   updater, or network client is present;
+8. every executable/DLL is checked for Authenticode status and the published
+   notes say the archive is unsigned and may trigger SmartScreen.
+
+Corresponding source is a separate checksum-bound asset. The minimized binary
+ZIP must not embed the Project.JJ ZIPs, compiler sources, CPython source,
+PyInstaller sources, or other build archives.

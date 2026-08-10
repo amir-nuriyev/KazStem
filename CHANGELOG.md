@@ -1,8 +1,29 @@
 # Changelog
 
-## 0.2.2 — 2026-08-10
+## 0.2.3 — 2026-08-10
 
-Native-runtime provenance release.
+Unified native-runtime and Windows portability release.
+
+- Checks the audited macOS arm64 and Ubuntu 24.04 x86-64 runtime identities
+  into one package-data lock; release-only lock overlays are forbidden.
+- Adds the complete checked-in Ubuntu minimal-runtime recipe, exact binary and
+  corresponding-source lock, PyInstaller spec, and recursive ELF audit.
+- Adds a real Windows x86-64 runtime pipeline for `windows-2022`, using exact
+  Project.JJ inputs and targeting the smallest proven PE closure with no
+  OpenSSL; the final file count is bound only after the native runner audit.
+- Statically validates every regular and delay-load PE import, rejects missing,
+  unreachable, non-AMD64, ambiguous, or unsafe runtime entries, and binds the
+  closure into the content-addressed runtime manifest.
+- Uses complete inventory plus forced fresh hashes on Windows, where ZIPs do
+  not portably preserve POSIX directory modes; `sealed_read_only` remains
+  truthful instead of being inferred from synthetic mode bits.
+- Falls back to bounded one-shot HFST guessing on Windows because CPython's
+  Windows selector cannot wait on anonymous subprocess pipes; POSIX retains
+  the faster persistent worker.
+- Requires two from-scratch, distinct-root native builds per platform to
+  produce byte-identical archives and bundle-relative verification evidence.
+- Documents unsigned/AuthentiCode and SmartScreen status explicitly and keeps
+  corresponding source separate from the minimized ready-run archive.
 
 - Adds a checked-in platform/runtime lock that binds the macOS arm64 helper
   manifest to the exact f03e resource bundle.
@@ -24,6 +45,8 @@ Native-runtime provenance release.
   runtime while retaining `hfst-proc`, optimized generation, and CG support.
 - Leaves the analyzer lattice, generator, OOV, and CG morphology unchanged;
   only the documented MyStem-compatible presentation is tightened as above.
+- Supersedes the private, unpublished 0.2.2 native-runtime candidates; no
+  public 0.2.2 release or artifact is part of the release history.
 
 ## 0.2.1 — 2026-08-10
 

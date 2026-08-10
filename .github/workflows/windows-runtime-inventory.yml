@@ -1,0 +1,148 @@
+name: Audit Windows native runtime candidate
+
+# Bootstrap only: this workflow creates a private candidate and the exact lock
+# entry that must be reviewed and committed before any ready-run release build.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/windows-runtime-inventory.yml'
+      - 'packaging/windows/**'
+      - 'scripts/audit_pe_runtime.py'
+      - 'scripts/platform_runtime_sources.windows-x86_64.lock.json'
+      - 'scripts/write_platform_runtime_manifest.py'
+      - 'src/qazmorph/backend.py'
+      - 'src/qazmorph/guesser.py'
+      - 'src/qazmorph/platform_runtime.py'
+      - 'src/qazmorph/platform_runtime_assets.lock.json'
+      - 'tests/test_backend.py'
+      - 'tests/test_guesser.py'
+      - 'tests/test_provenance_manifests.py'
+
+permissions:
+  contents: read
+
+jobs:
+  runtime-inventory:
+    name: Windows Server 2022 x86-64 inventory
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - name: Check out the exact candidate source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Select CPython 3.14.3
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: 3.14.3
+          cache: false
+
+      - name: Validate source-side Windows contracts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:PYTHONPATH = (Join-Path $env:GITHUB_WORKSPACE 'src')
+          python -m unittest `
+            tests.test_provenance_manifests.PlatformRuntimeManifestTests.test_new_platform_runtime_version_label_is_explicit `
+            tests.test_provenance_manifests.PlatformRuntimeManifestTests.test_source_lock_paths_are_portable_and_drive_relative_paths_are_rejected `
+            tests.test_provenance_manifests.PlatformRuntimeManifestTests.test_pe_dependency_audit_proves_exact_reachable_x86_64_closure `
+            tests.test_provenance_manifests.PlatformRuntimeManifestTests.test_pe_dependency_audit_rejects_missing_unreachable_and_wrong_machine_files `
+            tests.test_provenance_manifests.PlatformRuntimeManifestTests.test_checked_in_windows_source_lock_is_exact_and_contains_no_openssl `
+            tests.test_provenance_manifests.PlatformRuntimeManifestTests.test_windows_zip_inventory_rejects_cross_platform_escapes_and_links `
+            tests.test_provenance_manifests.PlatformRuntimeManifestTests.test_windows_evidence_audit_decodes_json_and_scans_plain_text `
+            tests.test_provenance_manifests.PlatformRuntimeManifestTests.test_windows_evidence_audit_accepts_logical_labels_and_skips_its_output `
+            tests.test_provenance_manifests.PlatformRuntimeManifestTests.test_windows_evidence_audit_rejects_invalid_json_and_utf8 `
+            tests.test_provenance_manifests.PlatformRuntimeManifestTests.test_windows_hfst_bound_probe_has_timeout_and_semantic_control `
+            tests.test_backend.ResourceManifestTests.test_windows_integrity_seal_uses_fresh_hashes_not_posix_directory_bits `
+            tests.test_backend.ResourceManifestTests.test_windows_integrity_seal_never_accepts_a_cached_or_partial_inventory `
+            tests.test_guesser.PersistentGuesserTests.test_windows_uses_bounded_one_shot_queries_instead_of_pipe_selectors `
+            tests.test_guesser.PersistentGuesserTests.test_windows_one_shot_passes_a_plus_one_completeness_sentinel `
+            tests.test_guesser.PersistentGuesserTests.test_windows_one_shot_timeout_terminates_the_helper `
+            tests.test_guesser.PersistentGuesserTests.test_windows_one_shot_retries_strict_utf8_protocol_failure_once `
+            tests.test_guesser.PersistentGuesserTests.test_windows_one_shot_rejects_non_lf_controls_and_extra_output `
+            tests.test_guesser.PersistentGuesserTests.test_windows_one_shot_caps_discard_every_partial_candidate `
+            tests.test_guesser.PersistentGuesserTests.test_windows_hard_stdout_cap_never_caches_partial_candidates `
+            tests.test_guesser.PersistentGuesserTests.test_windows_hard_stderr_cap_reaps_helper_and_recovers `
+            tests.test_guesser.PersistentGuesserTests.test_windows_reader_start_failure_still_reaps_helper
+          python -c "from qazmorph.platform_runtime import normalized_runtime_platform; assert normalized_runtime_platform() == ('windows', 'x86_64'); assert normalized_runtime_platform('win32', 'AMD64') == ('windows', 'x86_64')"
+
+      - name: Fetch and hash only locked Project.JJ binaries and corresponding source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $work = Join-Path $env:RUNNER_TEMP 'kazstem-windows-runtime'
+          New-Item -ItemType Directory -Path $work | Out-Null
+          python packaging/windows/fetch_locked_inputs.py `
+            --lock scripts/platform_runtime_sources.windows-x86_64.lock.json `
+            --archives (Join-Path $work 'inputs/binaries') `
+            --sources (Join-Path $work 'inputs/sources') `
+            | Tee-Object -FilePath (Join-Path $work 'locked-downloads.txt')
+          $hfstProbe = Join-Path $work 'hfst-option-probe'
+          Expand-Archive `
+            (Join-Path $work 'inputs/binaries/hfst-3.17.2+g4028~e16268eb.x86_64.zip') `
+            $hfstProbe
+          python packaging/windows/probe_hfst_bounds.py `
+            --root $hfstProbe `
+            --output (Join-Path $work 'bounded-helper-options.json')
+          "KAZSTEM_WINDOWS_WORK=$work" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Build twice in distinct roots and require byte identity
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $work = $env:KAZSTEM_WINDOWS_WORK
+          $common = @(
+            '--archives', (Join-Path $work 'inputs/binaries'),
+            '--sources', (Join-Path $work 'inputs/sources'),
+            '--source-lock', 'scripts/platform_runtime_sources.windows-x86_64.lock.json',
+            '--base-lock', 'src/qazmorph/platform_runtime_assets.lock.json'
+          )
+          python packaging/windows/build_runtime.py @common `
+            --output-parent (Join-Path $work 'build-a/platform-runtimes') `
+            --lock-output (Join-Path $work 'build-a/platform_runtime_assets.lock.json') `
+            --json (Join-Path $work 'build-a/runtime-build.json')
+          python packaging/windows/build_runtime.py @common `
+            --output-parent (Join-Path $work 'build-b/platform-runtimes') `
+            --lock-output (Join-Path $work 'build-b/platform_runtime_assets.lock.json') `
+            --json (Join-Path $work 'build-b/runtime-build.json')
+          python packaging/windows/compare_runtime_builds.py `
+            (Join-Path $work 'build-a/platform-runtimes') `
+            (Join-Path $work 'build-b/platform-runtimes') `
+            --output (Join-Path $work 'runtime-reproducibility.json')
+          $firstLock = (Get-FileHash -Algorithm SHA256 (Join-Path $work 'build-a/platform_runtime_assets.lock.json')).Hash
+          $secondLock = (Get-FileHash -Algorithm SHA256 (Join-Path $work 'build-b/platform_runtime_assets.lock.json')).Hash
+          if ($firstLock -ne $secondLock) {
+            throw 'Distinct-root proposed platform locks are not byte-identical'
+          }
+
+      - name: Stage logical, bundle-relative evidence
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $work = $env:KAZSTEM_WINDOWS_WORK
+          $evidence = Join-Path $work 'evidence'
+          New-Item -ItemType Directory -Path $evidence | Out-Null
+          Copy-Item (Join-Path $work 'locked-downloads.txt') $evidence
+          Copy-Item (Join-Path $work 'bounded-helper-options.json') $evidence
+          Copy-Item (Join-Path $work 'runtime-reproducibility.json') $evidence
+          Copy-Item (Join-Path $work 'build-a/runtime-build.json') (Join-Path $evidence 'runtime-build-a.json')
+          Copy-Item (Join-Path $work 'build-b/runtime-build.json') (Join-Path $evidence 'runtime-build-b.json')
+          Copy-Item (Join-Path $work 'build-a/platform_runtime_assets.lock.json') (Join-Path $evidence 'proposed-platform_runtime_assets.lock.json')
+          Copy-Item (Join-Path $work 'build-a/platform-runtimes') (Join-Path $evidence 'platform-runtimes') -Recurse
+          python packaging/windows/audit_evidence_paths.py `
+            --root $evidence `
+            --forbid $work `
+            --forbid $env:GITHUB_WORKSPACE `
+            --forbid $env:RUNNER_TEMP `
+            --output (Join-Path $evidence 'logical-evidence-path-audit.json')
+
+      - name: Upload private runtime candidate (not a release asset)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: kazstem-windows-runtime-candidate-${{ github.run_id }}
+          path: ${{ env.KAZSTEM_WINDOWS_WORK }}/evidence
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 9

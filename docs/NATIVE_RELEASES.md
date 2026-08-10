@@ -39,7 +39,7 @@ toolchain behavior. Once an entry matches, a missing or changed detached
 runtime fails closed. KazStem does not search a home-directory cache, ambient
 `PATH`, or a release-only hidden path for an official detached runtime.
 
-## macOS arm64 v0.2.2 runtime
+## macOS arm64 v0.2.3 runtime
 
 The source inputs, URLs, byte lengths, SHA-256 values, command versions, and
 license inventory are fixed by
@@ -64,7 +64,7 @@ non-system closure includes dylibs declaring macOS 14.0. The runtime lock
 therefore records 14.0 as its truthful minimum; the final frozen launcher may
 impose a newer minimum and must be labeled from its own Mach-O audit.
 
-The v0.2.2 CLI archive is unsigned in the distribution sense: upstream helper
+The v0.2.3 CLI archive is unsigned in the distribution sense: upstream helper
 binaries and the PyInstaller executable may have ad-hoc signatures, but there
 is no Apple Developer ID, Team ID, notarization ticket, or stapling claim.
 Release notes and the filename identify the exact tested macOS/arm64 target.
@@ -78,7 +78,7 @@ outside `_internal` in the layout above:
 python3 -m venv build-venv
 build-venv/bin/python -m pip install \
   pyinstaller==6.22.0 pyinstaller-hooks-contrib==2026.6 \
-  dist/kazstem-0.2.2-py3-none-any.whl
+  dist/kazstem-0.2.3-py3-none-any.whl
 SOURCE_DATE_EPOCH=1786361661 build-venv/bin/pyinstaller \
   --clean --noconfirm \
   --distpath pyinstaller-dist --workpath pyinstaller-work \
@@ -93,11 +93,58 @@ source asset; they are not runtime inputs. The remaining assembly, safe strip,
 ad-hoc signing, source binding, and verification procedure is recorded in
 `packaging/macos/README.md`.
 
-## Other platforms
+## Ubuntu 24.04 x86-64 runtime
+
+The checked-in Linux entry binds runtime
+`39a01ea673d024b0d6080739b5bb23c76daf0f7ed7bdb95dd1157d9dce4b627e`
+to f03e. Its 9,958-byte manifest has SHA-256
+`67da829d117d39d7de34afbc67dd649be24156fa9fab613aa318b438b9637f4b`.
+`scripts/platform_runtime_sources.linux-x86_64.lock.json` fixes the exact six
+Ubuntu binary packages and four complete Debian source sets. The public build
+and ELF-closure recipes are under `packaging/linux/`; no release-only package
+lock overlay is part of the contract.
+
+This target is Ubuntu 24.04 x86-64 with glibc 2.39, not generic Linux. The
+recursive audit records every host library, package version, required GLIBC/
+GLIBCXX/CXXABI symbol version, missing or escaped dependency, and the explicit
+absence of `_ssl`, `_hashlib`, `libssl`, and `libcrypto`.
+
+## Windows Server 2022 x86-64 tested runtime
+
+The Windows pipeline runs only on a real GitHub-hosted `windows-2022` runner.
+That is the only verified Windows OS target at this stage; the release does
+not infer a Windows 10 compatibility floor from a Server 2022 build.
+It consumes the exact Project.JJ HFST and CG-3 ZIPs fixed by
+`scripts/platform_runtime_sources.windows-x86_64.lock.json`, verifies their
+entire path/type/CRC inventory, and targets only the three required commands
+plus their recursively reached non-system DLLs. The real runner binds the
+final count and must prove every retained file is AMD64 PE; every ordinary and
+delay-load import must resolve to an adjacent manifest-bound DLL or the
+checked Windows system allowlist. OpenSSL must not be in that closure.
+
+Windows cannot portably preserve a denying directory ACL through an ordinary
+ZIP. Runtime provenance therefore does not reinterpret Windows `READONLY`
+attributes as POSIX permissions: `sealed_read_only` remains false, the cache is
+disabled, and every resource/runtime file is freshly re-hashed under the
+`windows-complete-inventory-force-rehash-v1` contract. Official status still
+requires the exact complete inventory, manifest, command hashes, PE closure,
+and no executable override.
+
+CPython's Windows selector cannot wait on anonymous subprocess pipes. The
+productive HFST guesser consequently uses a bounded one-shot child on Windows,
+with the same input, output, line, byte, timeout, protocol-correlation, and
+cleanup gates. POSIX builds retain the faster persistent worker.
+
+The ready-run ZIP is unsigned: no Authenticode publisher signature, timestamp,
+or SmartScreen reputation is claimed. The release notes must say this plainly;
+users may see an operating-system warning. Signing a later asset changes its
+bytes and requires a new checksum and verification ledger.
+
+## Additional platforms
 
 Platform runtimes are never inferred from a similarly named archive. Each
-Windows, Linux, macOS Intel, or additional architecture asset needs its own
-native build, checked-in lock entry, recursive dependency audit, license/source
-closure, and fresh-extract black-box test. Absence of such an entry means that
-KazStem falls back to the resource's original toolchain contract; it is not a
-claim that a binary for that platform exists.
+additional architecture or OS needs its own native build, checked-in lock
+entry, recursive dependency audit, license/source closure, two distinct-root
+reproducibility builds, and fresh-extract black-box test. Absence of such an
+entry means that KazStem falls back to the resource's original toolchain
+contract; it is not a claim that a binary for that platform exists.
