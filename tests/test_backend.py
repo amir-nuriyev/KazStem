@@ -19,6 +19,7 @@ from qazmorph.backend import (
     prepare_apertium_text,
     strip_boundary_superblanks,
 )
+from qazmorph.platform_runtime import PlatformRuntimeBinding
 
 
 class ApertiumBoundaryTests(unittest.TestCase):
@@ -581,7 +582,8 @@ class ResourceManifestTests(unittest.TestCase):
                         backend.environment = backend._environment()
                     self.assertEqual(backend.environment[name], secret_value)
 
-                    provenance = backend.runtime_provenance()
+                    with mock.patch("qazmorph.backend.sys.platform", "linux"):
+                        provenance = backend.runtime_provenance()
                     identity = provenance["environment"][name]
                     self.assertEqual(
                         identity,
@@ -616,7 +618,8 @@ class ResourceManifestTests(unittest.TestCase):
             ):
                 backend.environment = backend._environment()
 
-            provenance = backend.runtime_provenance()
+            with mock.patch("qazmorph.backend.sys.platform", "linux"):
+                provenance = backend.runtime_provenance()
             self.assertEqual(backend.environment["LD_PRELOAD"], ambient_value)
             self.assertEqual(
                 provenance["environment"]["LD_PRELOAD"],
@@ -654,6 +657,109 @@ class ResourceManifestTests(unittest.TestCase):
                 }
             }
             self.assertEqual(backend._resolve_toolchain_dir(manifest), old.resolve())
+
+    def test_backend_keeps_resource_build_binding_distinct_from_detached_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            resource = root / "resources"
+            resource.mkdir()
+            active = root / "platform-runtimes" / ("a" * 64)
+            active.mkdir(parents=True)
+            original = {
+                "bundle_id": "b" * 64,
+                "manifest": {"bytes": 10, "sha256": "c" * 64},
+            }
+            detached = {
+                "bundle_id": "a" * 64,
+                "manifest": {"bytes": 20, "sha256": "d" * 64},
+            }
+            selection = PlatformRuntimeBinding(
+                directory=active,
+                binding=detached,
+                lock_entry={
+                    "platform": {"system": "darwin", "machine": "arm64"},
+                    "resource_bundle_ids": ["e" * 64],
+                    **detached,
+                },
+                manifest={"commands": {}, "files": {}, "bundle_id": "a" * 64},
+            )
+            backend = FSTBackend.__new__(FSTBackend)
+            backend.resource_dir = resource
+            backend.runtime_dir = root
+            backend.manifest = {
+                "bundle_id": "e" * 64,
+                "build": {"toolchain": original},
+            }
+            with mock.patch(
+                "qazmorph.backend.resolve_platform_runtime", return_value=selection
+            ):
+                backend._select_runtime_toolchain()
+
+            self.assertEqual(backend.resource_build_toolchain_binding, original)
+            self.assertEqual(backend.toolchain_binding, detached)
+            self.assertEqual(backend.toolchain_origin, "platform-runtime-lock")
+            self.assertEqual(backend.toolchain_dir, active)
+
+    def test_detached_runtime_provenance_reports_original_build_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            resource_dir = root / "resources"
+            resource_dir.mkdir()
+            manifest = self.write_resource_manifest(resource_dir, RESOURCE_MANIFEST_V3)
+            backend = self.runtime_backend(resource_dir, manifest, root / "toolchain")
+            self.seal_resource_bundle(resource_dir)
+            backend.toolchain_dir = backend.toolchain_dir.resolve()
+            backend.hfst_proc = str(Path(backend.hfst_proc).resolve())
+            original = {
+                "bundle_id": "f" * 64,
+                "manifest": {"bytes": 99, "sha256": "e" * 64},
+            }
+            backend.resource_build_toolchain_binding = original
+            backend.toolchain_binding = dict(manifest["build"]["toolchain"])
+            backend.toolchain_origin = "platform-runtime-lock"
+            backend.platform_runtime_lock_entry = {
+                "platform": {"system": "darwin", "machine": "arm64"},
+                "resource_bundle_ids": [manifest["bundle_id"]],
+                **backend.toolchain_binding,
+            }
+            backend._executable_origins["hfst-proc"] = "platform-runtime-lock"
+
+            provenance = backend.runtime_provenance()
+
+            self.assertEqual(provenance["resource_build_toolchain"], original)
+            self.assertEqual(
+                provenance["active_runtime"]["origin"], "platform-runtime-lock"
+            )
+            self.assertEqual(
+                provenance["active_runtime"]["bundle_id"],
+                backend.toolchain_binding["bundle_id"],
+            )
+            self.assertTrue(provenance["executables"]["hfst-proc"]["verified"])
+
+            backend._ambient_dyld_library_path = "/untrusted/dylibs"
+            with mock.patch("qazmorph.backend.sys.platform", "darwin"):
+                injected = backend.runtime_provenance()
+            self.assertFalse(injected["official"])
+            self.assertIn(
+                "ambient DYLD_LIBRARY_PATH extends the dynamic-library search path",
+                injected["non_official_reasons"],
+            )
+            self.assertNotIn("/untrusted/dylibs", json.dumps(injected))
+
+    def test_darwin_runtime_uses_rpaths_and_records_dyld_injection(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            backend = FSTBackend.__new__(FSTBackend)
+            backend.toolchain_dir = Path(temporary)
+            with mock.patch("qazmorph.backend.sys.platform", "darwin"), mock.patch.dict(
+                os.environ,
+                {"DYLD_LIBRARY_PATH": "/untrusted", "DYLD_INSERT_LIBRARIES": "/inject"},
+                clear=True,
+            ):
+                environment = backend._environment()
+
+            self.assertNotIn("LD_LIBRARY_PATH", environment)
+            self.assertEqual(backend._ambient_dyld_library_path, "/untrusted")
+            self.assertEqual(backend._ambient_dyld_insert_libraries, "/inject")
 
     def test_missing_resource_bound_toolchain_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

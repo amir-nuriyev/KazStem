@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections import OrderedDict
 import json
 import re
-from xml.sax.saxutils import escape, quoteattr
 
 from .types import Analysis, AnalysisSpan, Document, Token
 
@@ -15,6 +14,33 @@ class XMLFormatError(ValueError):
 
 
 _XML_ENCODING_NAME = re.compile(r"[A-Za-z][A-Za-z0-9._-]*\Z")
+
+
+def _escape_xml_text(value: str) -> str:
+    """Match ``xml.sax.saxutils.escape`` without importing its URL stack."""
+
+    # Ampersand must be escaped first so replacement entities stay intact.
+    return (
+        value.replace("&", "&amp;")
+        .replace(">", "&gt;")
+        .replace("<", "&lt;")
+    )
+
+
+def _quote_xml_attribute(value: str) -> str:
+    """Match ``xml.sax.saxutils.quoteattr`` for the fixed entity set."""
+
+    escaped = _escape_xml_text(value)
+    escaped = (
+        escaped.replace("\n", "&#10;")
+        .replace("\r", "&#13;")
+        .replace("\t", "&#9;")
+    )
+    if '"' in escaped:
+        if "'" in escaped:
+            return f'"{escaped.replace(chr(34), "&quot;")}"'
+        return f"'{escaped}'"
+    return f'"{escaped}"'
 
 
 def _validate_xml_10(value: str, *, field: str) -> str:
@@ -37,11 +63,11 @@ def _validate_xml_10(value: str, *, field: str) -> str:
 
 
 def _xml_text(value: str, *, field: str) -> str:
-    return escape(_validate_xml_10(value, field=field))
+    return _escape_xml_text(_validate_xml_10(value, field=field))
 
 
 def _xml_attribute(value: object, *, field: str) -> str:
-    return quoteattr(_validate_xml_10(str(value), field=field))
+    return _quote_xml_attribute(_validate_xml_10(str(value), field=field))
 
 
 def _xml_encoding_attribute(encoding: str) -> str:
@@ -50,7 +76,7 @@ def _xml_encoding_attribute(encoding: str) -> str:
         raise XMLFormatError(
             "XML declaration encoding must match the XML EncName syntax"
         )
-    return quoteattr(encoding)
+    return _quote_xml_attribute(encoding)
 
 
 def _matches_filter(analysis: Analysis, filters: frozenset[str]) -> bool:

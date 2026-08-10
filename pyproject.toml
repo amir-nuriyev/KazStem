@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kazstem"
-version = "0.2.1"
+version = "0.2.2"
 description = "Ambiguity-preserving Kazakh morphological analyzer and generator with a MyStem-like CLI"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -24,6 +24,7 @@ dependencies = []
 [project.urls]
 Homepage = "https://github.com/amir-nuriyev/KazStem"
 Documentation = "https://github.com/amir-nuriyev/KazStem#readme"
+Browser = "https://amir-nuriyev.github.io/KazStem/"
 Repository = "https://github.com/amir-nuriyev/KazStem"
 Issues = "https://github.com/amir-nuriyev/KazStem/issues"
 Changelog = "https://github.com/amir-nuriyev/KazStem/releases"
@@ -38,3 +39,6 @@ package-dir = { "" = "src" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+qazmorph = ["platform_runtime_assets.lock.json"]

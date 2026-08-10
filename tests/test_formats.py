@@ -6,10 +6,14 @@ from pathlib import Path
 import tempfile
 import unittest
 from xml.etree import ElementTree
+from xml.sax.saxutils import escape as sax_escape
+from xml.sax.saxutils import quoteattr as sax_quoteattr
 
 from qazmorph.fixlist import load_fixlist
 from qazmorph.formats import (
     XMLFormatError,
+    _escape_xml_text,
+    _quote_xml_attribute,
     format_conllu,
     format_jsonl,
     format_mystem_json,
@@ -462,6 +466,26 @@ class MyStemJsonFormatterTests(unittest.TestCase):
 
 
 class XmlFormatterTests(unittest.TestCase):
+    def test_local_xml_escaping_matches_the_prior_stdlib_behavior(self) -> None:
+        values = (
+            "",
+            "plain ASCII",
+            "қазақша 😀",
+            "&<>",
+            "single'quote",
+            'double"quote',
+            'both\'"quotes',
+            "line\ncarriage\rtab\tend",
+            "&amp; is input text, not a pre-escaped entity",
+        )
+        for value in values:
+            with self.subTest(value=value):
+                self.assertEqual(_escape_xml_text(value), sax_escape(value))
+                self.assertEqual(
+                    _quote_xml_attribute(value),
+                    sax_quoteattr(value),
+                )
+
     def test_xml_escapes_text_and_attributes_and_is_well_formed_shape(self) -> None:
         analysis = make_analysis('a&"b', "NOUN", score=0.5)
         document = Document(

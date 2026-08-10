@@ -32,6 +32,8 @@ typed Python API, but its implementation is independent of MyStem.
   post-run integrity verification;
 - versioned evaluation and performance reports with explicit coverage,
   abstention, alignment, and completeness accounting.
+- SHA-locked native-runtime manifests for public binary bundles, with the
+  resource build toolchain and the active platform runtime reported separately.
 
 The production core is hybrid:
 
@@ -142,6 +144,19 @@ the host platform, and whether ambient `LD_LIBRARY_PATH`, `LD_PRELOAD`, or
 rather than exposed.
 Legacy v2 resources remain usable through standard lookup, but are labeled
 non-official because their historical toolchain was not sealed read-only.
+
+Version 0.2.2 also supports a detached native runtime shipped beside an exact
+resource bundle. `src/qazmorph/platform_runtime_assets.lock.json` binds the
+platform, resource bundle ID, native-runtime bundle ID, and manifest bytes.
+Selection never searches a user cache or ambient `PATH`: it is restricted to
+the content-addressed `.qazmorph/platform-runtimes/` directory beside the
+verified resources and fails closed after a matching lock record exists. The
+f03e resource manifest remains byte-for-byte unchanged and continues to report
+the Ubuntu r4 toolchain that built it; runtime provenance separately reports
+the active macOS arm64 identity. macOS helpers use bundle-relative Mach-O
+rpaths, and ambient `DYLD_LIBRARY_PATH` or `DYLD_INSERT_LIBRARIES` makes a run
+non-official. Native assets are platform-specific and their release notes state
+the tested OS/architecture and signing status.
 
 For packaged source and Python-wheel downloads, see
 [GitHub Releases](https://github.com/amir-nuriyev/KazStem/releases). The wheel
@@ -373,7 +388,7 @@ BibTeX users can cite [CITATION.bib](CITATION.bib):
   author  = {Amir Nuriyev},
   title   = {KazStem: an ambiguity-preserving Kazakh morphological analyzer and generator},
   year    = {2026},
-  version = {0.2.1},
+  version = {0.2.2},
   url     = {https://github.com/amir-nuriyev/KazStem},
   license = {GPL-3.0-or-later}
 }

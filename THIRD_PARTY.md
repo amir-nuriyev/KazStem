@@ -27,6 +27,47 @@ They use the locked source commit timestamp rather than wall-clock build time,
 so two byte-identical builds have the same manifest and content address. The
 runtime verifies the resource hashes before loading.
 
+## macOS arm64 detached runtime (0.2.2)
+
+The macOS arm64 binary asset uses the unchanged f03e `apertium-kaz` resource
+bundle above, but does not claim that f03e was built by the macOS tools. The
+resource manifest continues to bind its original Ubuntu r4 build toolchain.
+The active runtime is a separate, checked-in identity generated from
+`scripts/platform_runtime_sources.lock.json`.
+
+The only native input archives are the following Apertium Project.JJ artifacts:
+
+| Archive | Bytes | SHA-256 |
+|---|---:|---|
+| [`hfst-3.17.2+g4028~e16268eb.arm64.tar.bz2`](https://apertium.projectjj.com/osx/nightly/arm64/hfst-3.17.2+g4028~e16268eb.arm64.tar.bz2) | 17,328,650 | `c5396b147315eae17a3d3b193b8545f90354ba90324310b31593b4f6ccef5ab1` |
+| [`cg3-1.6.8+g2347~8d5fa4dd.arm64.tar.bz2`](https://apertium.projectjj.com/osx/nightly/arm64/cg3-1.6.8+g2347~8d5fa4dd.arm64.tar.bz2) | 14,551,351 | `78b4b47596dfa06222e225e5fc45cae385643c9bec33260d3ad3a8b92ae7017c` |
+
+HFST's archive is not independently closed: its foma library loads
+`@rpath/libz.1.dylib`, which is supplied by the pinned CG-3 archive. KazStem
+therefore verifies and treats the minimal merged dependency set as one runtime
+bundle. It includes four command entry points, their complete non-system Mach-O
+closure, and no compilation tools or neural-model weights.
+
+| Redistributed component | Exact source/version | License / notice |
+|---|---|---|
+| HFST tools and `libhfst` | [`e16268ebb6af72590d82da3867dcbb5f48e3f11c`](https://github.com/hfst/hfst/tree/e16268ebb6af72590d82da3867dcbb5f48e3f11c) | Tools are GPL-3.0-or-later; `libhfst` is LGPL-3.0-or-later and its selected back ends retain their own terms. See the source `COPYING` files. |
+| CG-3 / `libcg3` | [`8d5fa4ddc396bcb9cbee76baafa0aa025f182dbc`](https://github.com/GrammarSoft/cg3/tree/8d5fa4ddc396bcb9cbee76baafa0aa025f182dbc) | GPL-3.0-or-later; see [`COPYING`](https://github.com/GrammarSoft/cg3/blob/8d5fa4ddc396bcb9cbee76baafa0aa025f182dbc/COPYING). |
+| foma | [`5a800702f8e49ef994fc4058c442a365c22ceeca`](https://github.com/TinoDidriksen/foma/tree/5a800702f8e49ef994fc4058c442a365c22ceeca) | Apache-2.0. |
+| OpenFst | [`04a59153ece50a28829ef8e68f820ffda93805c6`](https://github.com/TinoDidriksen/openfst/tree/04a59153ece50a28829ef8e68f820ffda93805c6) | Apache-2.0. |
+| ICU | 78.3 | [Unicode License v3](https://github.com/unicode-org/icu/blob/release-78.3/LICENSE). |
+| GNU Readline | 8.3 | GPL-3.0-or-later; [source archive](https://ftp.gnu.org/gnu/readline/readline-8.3.tar.gz). |
+| ncurses | 6.6.20251230 | [ncurses permissive notice](https://invisible-island.net/archives/ncurses/current/ncurses-6.6-20251230.tgz). |
+| SQLite | 3.51.3 | [Public-domain dedication/blessing](https://www.sqlite.org/copyright.html). |
+| zlib | 1.3.2 | [zlib license](https://zlib.net/zlib_license.html). |
+
+The Project.JJ macOS packaging process is public in
+[`apertium/packaging`](https://github.com/apertium/packaging/tree/444f3d53dd978fe65c4d227846f3d649de31ee46).
+The release bundle retains the applicable license texts and exact corresponding
+source archives described by the source lock. Apple `libSystem` and `libc++`
+are host System Libraries and are not copied into the archive. The native
+executables carry upstream ad-hoc/linker signatures only; they have no Team ID
+and the CLI archive is not Developer-ID signed or notarized.
+
 The optional neural lock verifies the `uv` executable, exact model bytes,
 project-source bytes, the Python/Torch/CUDA values declared by the lock, and
 exact versions for the selected venv and host packages named there. The

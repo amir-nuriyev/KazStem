@@ -303,10 +303,10 @@ class PersistentGuesserTests(unittest.TestCase):
         self.mode_file.write_text("normal", encoding="utf-8")
         complete = self.guesser._raw_lookup("жаңасөз", max_lines=1, timeout=2.0)
         self.assertEqual(complete, ["жаңасөз\tжаңасөз<n><nom>\t0.0"])
-        self.assertEqual(
-            self.counter.read_text(encoding="utf-8").splitlines(),
-            ["started", "started"],
-        )
+        # The internal monotonic counter observes both Popen calls directly;
+        # unlike the terminated fake helper's test-only file append, it is a
+        # platform-independent assertion of the restart contract.
+        self.assertEqual(self.guesser.diagnostics["worker_starts"], 2)
 
     def test_nonzero_exit_is_reported(self) -> None:
         self.mode_file.write_text("failure", encoding="utf-8")

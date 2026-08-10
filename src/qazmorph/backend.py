@@ -7,8 +7,11 @@ import hashlib
 import os
 from pathlib import Path
 import subprocess
+import sys
 from typing import Any
 import unicodedata
+
+from .platform_runtime import PlatformRuntimeError, resolve_platform_runtime
 
 
 class BackendError(RuntimeError):
@@ -222,7 +225,7 @@ class FSTBackend:
             if self.guesser_optimized
             else "kaz.guesser.automorf.hfst"
         )
-        self.toolchain_dir = self._resolve_toolchain_dir(self.manifest)
+        self._select_runtime_toolchain()
         self.toolchain_manifest = self._read_bound_toolchain_manifest()
         self._toolchain_inventory = self._verify_bound_toolchain_inventory()
         self._executable_origins: dict[str, str] = {}
@@ -234,6 +237,30 @@ class FSTBackend:
         self.hfst_optimized_lookup = self._find_executable(
             "hfst-optimized-lookup", "QAZMORPH_HFST_OPTIMIZED_LOOKUP", required=False
         )
+
+    def _select_runtime_toolchain(self) -> None:
+        """Select a locked native runtime or retain the resource build binding."""
+
+        original = self.manifest.get("build", {}).get("toolchain")
+        if not isinstance(original, dict):
+            raise BackendError("Resource manifest has no valid toolchain binding")
+        self.resource_build_toolchain_binding = dict(original)
+        try:
+            detached = resolve_platform_runtime(
+                self.resource_dir, str(self.manifest.get("bundle_id", ""))
+            )
+        except PlatformRuntimeError as exc:
+            raise BackendError(str(exc)) from exc
+        if detached is None:
+            self.toolchain_dir = self._resolve_toolchain_dir(self.manifest)
+            self.toolchain_binding = dict(original)
+            self.toolchain_origin = "resource-bound-toolchain"
+            self.platform_runtime_lock_entry = None
+            return
+        self.toolchain_dir = detached.directory
+        self.toolchain_binding = dict(detached.binding)
+        self.toolchain_origin = detached.origin
+        self.platform_runtime_lock_entry = dict(detached.lock_entry)
 
     @staticmethod
     def _find_resource_dir(explicit: str | os.PathLike[str] | None) -> Path:
@@ -513,7 +540,11 @@ class FSTBackend:
     def _verify_current_toolchain_manifest(self) -> dict[str, Any]:
         """Re-read the bound manifest and verify every recorded identity."""
 
-        binding = self.manifest.get("build", {}).get("toolchain")
+        binding = getattr(
+            self,
+            "toolchain_binding",
+            self.manifest.get("build", {}).get("toolchain"),
+        )
         expected = binding.get("manifest") if isinstance(binding, dict) else None
         expected_bundle = binding.get("bundle_id") if isinstance(binding, dict) else None
         if (
@@ -522,7 +553,7 @@ class FSTBackend:
             or not isinstance(expected.get("sha256"), str)
             or not isinstance(expected_bundle, str)
         ):
-            raise BackendError("Resource manifest has no valid toolchain binding")
+            raise BackendError("Active runtime has no valid manifest binding")
 
         path = self.toolchain_dir / "manifest.json"
         try:
@@ -741,17 +772,23 @@ class FSTBackend:
 
     def _environment(self) -> dict[str, str]:
         environment = os.environ.copy()
+        self._ambient_library_path = environment.get("LD_LIBRARY_PATH")
         self._ambient_ld_preload = environment.get("LD_PRELOAD")
         self._ambient_ld_audit = environment.get("LD_AUDIT")
+        self._ambient_dyld_library_path = environment.get("DYLD_LIBRARY_PATH")
+        self._ambient_dyld_insert_libraries = environment.get(
+            "DYLD_INSERT_LIBRARIES"
+        )
         for key in ("CG3_DEFAULT", "CG3_OVERRIDE"):
             environment.pop(key, None)
+        if not sys.platform.startswith("linux"):
+            return environment
         prefixes = (
             self.toolchain_dir / "usr" / "lib" / "x86_64-linux-gnu",
             self.toolchain_dir / "usr" / "lib",
         )
         library_path = [str(path) for path in prefixes if path.is_dir()]
-        existing = environment.get("LD_LIBRARY_PATH")
-        self._ambient_library_path = existing
+        existing = self._ambient_library_path
         if existing:
             library_path.append(existing)
         if library_path:
@@ -815,7 +852,9 @@ class FSTBackend:
         digest = hashlib.sha256(candidate.read_bytes()).hexdigest()
         if digest != expected_hash:
             raise BackendError(f"Bound toolchain executable checksum failed: {name}")
-        self._executable_origins[name] = "resource-bound-toolchain"
+        self._executable_origins[name] = getattr(
+            self, "toolchain_origin", "resource-bound-toolchain"
+        )
         self._executable_verified[name] = True
         return str(candidate)
 
@@ -867,6 +906,10 @@ class FSTBackend:
         fresh_toolchain_verified = bool(
             toolchain.get("verified") and inventory.get("verified")
         )
+        toolchain_origin = getattr(
+            self, "toolchain_origin", "resource-bound-toolchain"
+        )
+        bound_origins = {"resource-bound-toolchain", "platform-runtime-lock"}
         executables: dict[str, dict[str, int | str | bool] | None] = {}
         unverified_overrides: set[str] = set()
         bound_executable_errors: list[str] = []
@@ -884,7 +927,7 @@ class FSTBackend:
             verified = bool(
                 initially_verified
                 and (
-                    origin != "resource-bound-toolchain"
+                    origin not in bound_origins
                     or fresh_toolchain_verified
                 )
             )
@@ -896,10 +939,10 @@ class FSTBackend:
                         digest.update(block)
                     stat = os.fstat(stream.fileno())
                 executable_error: str | None = None
-                if origin == "resource-bound-toolchain":
+                if origin in bound_origins:
                     try:
                         relative_name = path.relative_to(
-                            self.toolchain_dir
+                            self.toolchain_dir.resolve()
                         ).as_posix()
                     except ValueError:
                         relative_name = ""
@@ -934,10 +977,10 @@ class FSTBackend:
                     "verified": False,
                     "error": "runtime executable is unavailable during provenance verification",
                 }
-                if origin == "resource-bound-toolchain":
+                if origin in bound_origins:
                     bound_executable_errors.append(name)
             executables[name] = executable
-            if not verified and origin != "resource-bound-toolchain":
+            if not verified and origin not in bound_origins:
                 unverified_overrides.add(origin)
 
         if bound_executable_errors:
@@ -971,7 +1014,7 @@ class FSTBackend:
         ]
         if verification_error is not None:
             non_official_reasons.append(
-                f"bound toolchain runtime verification failed: {verification_error}"
+                f"bound runtime verification failed: {verification_error}"
             )
         if self.manifest["schema"] == RESOURCE_MANIFEST_V2:
             non_official_reasons.append(
@@ -984,7 +1027,11 @@ class FSTBackend:
                 )
             if verification_error is None and not inventory.get("sealed_read_only"):
                 non_official_reasons.append(
-                    "resource v3 bound toolchain is not sealed read-only"
+                    (
+                        "resource v3 bound toolchain is not sealed read-only"
+                        if toolchain_origin == "resource-bound-toolchain"
+                        else "resource v3 active platform runtime is not sealed read-only"
+                    )
                 )
             if not resource_inventory.get("verified"):
                 non_official_reasons.append(
@@ -994,18 +1041,28 @@ class FSTBackend:
                 non_official_reasons.append(
                     "resource v3 bundle is not sealed read-only"
                 )
-        if self._ambient_library_path:
-            non_official_reasons.append(
-                "ambient LD_LIBRARY_PATH extends the dynamic-library search path"
-            )
-        if self._ambient_ld_preload:
-            non_official_reasons.append(
-                "ambient LD_PRELOAD is present and can inject unverified code"
-            )
-        if self._ambient_ld_audit:
-            non_official_reasons.append(
-                "ambient LD_AUDIT is present and can inject unverified code"
-            )
+        if sys.platform.startswith("linux"):
+            if getattr(self, "_ambient_library_path", None):
+                non_official_reasons.append(
+                    "ambient LD_LIBRARY_PATH extends the dynamic-library search path"
+                )
+            if getattr(self, "_ambient_ld_preload", None):
+                non_official_reasons.append(
+                    "ambient LD_PRELOAD is present and can inject unverified code"
+                )
+            if getattr(self, "_ambient_ld_audit", None):
+                non_official_reasons.append(
+                    "ambient LD_AUDIT is present and can inject unverified code"
+                )
+        elif sys.platform == "darwin":
+            if getattr(self, "_ambient_dyld_library_path", None):
+                non_official_reasons.append(
+                    "ambient DYLD_LIBRARY_PATH extends the dynamic-library search path"
+                )
+            if getattr(self, "_ambient_dyld_insert_libraries", None):
+                non_official_reasons.append(
+                    "ambient DYLD_INSERT_LIBRARIES is present and can inject unverified code"
+                )
         official = extracted_subset_verified and not non_official_reasons
         loader_environment = {
             name: {
@@ -1017,18 +1074,56 @@ class FSTBackend:
                 ),
             }
             for name, value in (
-                ("LD_PRELOAD", self._ambient_ld_preload),
-                ("LD_AUDIT", self._ambient_ld_audit),
+                ("LD_PRELOAD", getattr(self, "_ambient_ld_preload", None)),
+                ("LD_AUDIT", getattr(self, "_ambient_ld_audit", None)),
+                (
+                    "DYLD_LIBRARY_PATH",
+                    getattr(self, "_ambient_dyld_library_path", None),
+                ),
+                (
+                    "DYLD_INSERT_LIBRARIES",
+                    getattr(self, "_ambient_dyld_insert_libraries", None),
+                ),
             )
         }
+        resource_build_toolchain = getattr(
+            self,
+            "resource_build_toolchain_binding",
+            self.manifest.get("build", {}).get("toolchain"),
+        )
+        active_binding = getattr(self, "toolchain_binding", resource_build_toolchain)
+        active_runtime = {
+            "origin": toolchain_origin,
+            "bundle_id": (
+                active_binding.get("bundle_id")
+                if isinstance(active_binding, dict)
+                else None
+            ),
+            "platform_lock": getattr(self, "platform_runtime_lock_entry", None),
+        }
+        if sys.platform == "darwin":
+            dynamic_dependency_closure = (
+                "non-system Mach-O dependencies are included in the active runtime "
+                "manifest; Apple libSystem and libc++ remain host System Libraries"
+            )
+        elif sys.platform.startswith("linux"):
+            dynamic_dependency_closure = (
+                "host ELF dependencies outside the extracted manifest are not byte-locked"
+            )
+        elif sys.platform == "win32":
+            dynamic_dependency_closure = (
+                "Windows system DLLs outside the extracted manifest are not byte-locked"
+            )
+        else:
+            dynamic_dependency_closure = (
+                "host system libraries outside the extracted manifest are not byte-locked"
+            )
         return {
             "official": official,
             "verified": extracted_subset_verified,
-            "verification_scope": "complete resource bundle and extracted toolchain subset",
+            "verification_scope": "complete resource bundle and complete active runtime bundle",
             "byte_closed": False,
-            "dynamic_dependency_closure": (
-                "host ELF dependencies outside the extracted manifest are not byte-locked"
-            ),
+            "dynamic_dependency_closure": dynamic_dependency_closure,
             "guesser_runtime": {
                 "format": self.guesser_format,
                 "verified_finite": self.guesser_verified_finite,
@@ -1038,6 +1133,8 @@ class FSTBackend:
             "non_official_reasons": non_official_reasons,
             "executables": executables,
             "toolchain_manifest": toolchain,
+            "resource_build_toolchain": resource_build_toolchain,
+            "active_runtime": active_runtime,
             "resource_inventory": resource_inventory,
             "toolchain_inventory": inventory,
             "environment": {

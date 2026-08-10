@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -22,6 +23,7 @@ def load_script(name: str):
 
 neural = load_script("write_neural_manifest.py")
 toolchain = load_script("write_toolchain_manifest.py")
+platform_runtime = load_script("write_platform_runtime_manifest.py")
 resources = load_script("write_manifest.py")
 
 
@@ -130,7 +132,6 @@ class ToolchainManifestPrimitiveTests(unittest.TestCase):
         self.assertEqual(
             toolchain.verify_archive_records([record], [dict(record)]), [record]
         )
-
     def test_every_locked_archive_dimension_is_enforced(self) -> None:
         record = self.archive_record()
         alternatives = {
@@ -178,6 +179,78 @@ class ToolchainManifestPrimitiveTests(unittest.TestCase):
         self.assertIn("hfst-fst2strings", lock["required_commands"])
         self.assertIn("hfst-fst2txt", lock["required_commands"])
         self.assertIn("hfst-regexp2fst", lock["required_commands"])
+
+
+class PlatformRuntimeManifestTests(unittest.TestCase):
+    def test_checked_in_source_lock_has_exact_mac_archives_and_commands(self) -> None:
+        lock = platform_runtime.load_source_lock(
+            PROJECT_ROOT / "scripts" / "platform_runtime_sources.lock.json"
+        )
+        self.assertEqual(lock["platform"]["minimum_os"], "14.0")
+        self.assertEqual(
+            {record["sha256"] for record in lock["archives"]},
+            {
+                "c5396b147315eae17a3d3b193b8545f90354ba90324310b31593b4f6ccef5ab1",
+                "78b4b47596dfa06222e225e5fc45cae385643c9bec33260d3ad3a8b92ae7017c",
+            },
+        )
+        self.assertEqual(
+            {record["name"] for record in lock["required_commands"]},
+            {"hfst-proc", "hfst-optimized-lookup", "cg-proc"},
+        )
+
+    def test_runtime_inventory_records_symlink_and_regular_file_separately(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            target = root / "usr" / "bin" / "actual"
+            target.parent.mkdir(parents=True)
+            target.write_bytes(b"runtime")
+            target.chmod(0o555)
+            (target.parent / "alias").symlink_to("actual")
+            output = root / "manifest.json"
+            output.write_text("{}\n", encoding="utf-8")
+            (root / "manifest-alias").symlink_to("manifest.json")
+
+            inventory = platform_runtime.extracted_files(root, output=output)
+
+            self.assertEqual(inventory["usr/bin/alias"]["target"], "actual")
+            self.assertEqual(
+                inventory["manifest-alias"]["target"], "manifest.json"
+            )
+            self.assertNotIn("manifest.json", inventory)
+            self.assertEqual(inventory["usr/bin/actual"]["bytes"], 7)
+            self.assertEqual(
+                inventory["usr/bin/actual"]["sha256"],
+                platform_runtime.sha256(target),
+            )
+
+    def test_corresponding_source_directory_tampering_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "source.tar.gz"
+            source.write_bytes(b"source")
+            record = {
+                "filename": source.name,
+                "bytes": source.stat().st_size,
+                "sha256": platform_runtime.sha256(source),
+            }
+            source.write_bytes(b"changed")
+            with self.assertRaisesRegex(platform_runtime.ManifestError, "identity mismatch"):
+                platform_runtime.verify_record_directory(
+                    [record], root, label="source"
+                )
+
+    def test_runtime_inventory_rejects_unsupported_special_entries(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            fifo = root / "unexpected.fifo"
+            os.mkfifo(fifo)
+            with self.assertRaisesRegex(
+                platform_runtime.ManifestError, "unsupported.*entry type"
+            ):
+                platform_runtime.extracted_files(
+                    root, output=root / "manifest.json"
+                )
 
 
 class BuildScriptOrderingTests(unittest.TestCase):
