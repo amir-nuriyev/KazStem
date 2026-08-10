@@ -1,0 +1,13 @@
+{
+  "id": "./",
+  "name": "KazStem Browser",
+  "short_name": "KazStem",
+  "description": "Client-only Kazakh morphological analysis proof of concept",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f6f7f2",
+  "theme_color": "#153d36",
+  "lang": "en",
+  "icons": [{ "src": "./icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}

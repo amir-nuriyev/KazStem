@@ -1,0 +1,32 @@
+{
+  "apertium_kaz_commit": "95c6dd0d8536ee69a7058634b03a3e82100b6b6e",
+  "project_commit": "97cf865a0cef20ee78be1610bbe76ec6c7e52006",
+  "project_version": "0.2.1",
+  "proofs": {
+    "candidate_probe_ledger": {
+      "bytes": 3437,
+      "path": "probe-ledger-summary.json",
+      "sha256": "6d4b8d2f8216a99fcd8e048e9b21aae6d94e88880acf0f3201d34876e4aeaf22"
+    },
+    "input_epsilon_cycle_reachable": false
+  },
+  "resource": {
+    "bytes": 950181,
+    "graph": {
+      "arc_count": 91470,
+      "final_count": 230,
+      "input_epsilon_cycle_reachable": false,
+      "start_state": 0,
+      "state_count": 42965
+    },
+    "path": "analyzer.kzc",
+    "sha256": "d0df783b4a51eef7db513662ca2fb4ae2d78f7c78ca7b4b797e84e72ccc3c4c0"
+  },
+  "schema": "kazstem.browser-resource-manifest.v1",
+  "unsupported_modes": [
+    "constraint-grammar",
+    "neural-ranking",
+    "productive-oov",
+    "generation"
+  ]
+}

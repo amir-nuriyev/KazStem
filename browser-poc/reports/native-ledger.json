@@ -1,0 +1,211 @@
+{
+  "apertium_kaz_commit": "95c6dd0d8536ee69a7058634b03a3e82100b6b6e",
+  "comparison": "ordered raw candidate arrays after NFC normalization",
+  "fst": {
+    "bytes": 1634211,
+    "sha256": "23d9f6d19c19ce7817db521d557a4ea235802732769c181cfb41f98f4933d565"
+  },
+  "probes_sha256": "cc895490386dbf45fceee8fceb59dfd039cdf38891a4320cb774c161c97991c9",
+  "project_commit": "97cf865a0cef20ee78be1610bbe76ec6c7e52006",
+  "rows": [
+    {
+      "candidates": [
+        "Қазақстан<np><top><gen>"
+      ],
+      "normalized": "Қазақстанның",
+      "surface": "Қазақстанның"
+    },
+    {
+      "candidates": [
+        "кітап<n><attr>",
+        "кітап<n><nom>",
+        "кітап<n><nom>+е<cop><aor><p3><pl>",
+        "кітап<n><nom>+е<cop><aor><p3><sg>"
+      ],
+      "normalized": "кітап",
+      "surface": "кітап"
+    },
+    {
+      "candidates": [
+        "кітап<n><px3sp><nom>",
+        "кітап<n><px3sp><nom>+е<cop><aor><p3><pl>",
+        "кітап<n><px3sp><nom>+е<cop><aor><p3><sg>"
+      ],
+      "normalized": "кітабы",
+      "surface": "кітабы"
+    },
+    {
+      "candidates": [
+        "кітап<n><pl><px1pl><abl>",
+        "кітап<n><pl><px1pl><abl>+е<cop><aor><p3><pl>",
+        "кітап<n><pl><px1pl><abl>+е<cop><aor><p3><sg>"
+      ],
+      "normalized": "кітаптарымыздан",
+      "surface": "кітаптарымыздан"
+    },
+    {
+      "candidates": [
+        "сөз<n><nom>+ау<mod_emo>",
+        "сөз<n><nom>+е<cop><aor><p3><pl>+ау<mod_emo>",
+        "сөз<n><nom>+е<cop><aor><p3><sg>+ау<mod_emo>"
+      ],
+      "normalized": "сөз-ау",
+      "surface": "сөз-ау"
+    },
+    {
+      "candidates": [
+        "азық-түлік<n><attr>",
+        "азық-түлік<n><nom>",
+        "азық-түлік<n><nom>+е<cop><aor><p3><pl>",
+        "азық-түлік<n><nom>+е<cop><aor><p3><sg>"
+      ],
+      "normalized": "азық-түлік",
+      "surface": "азық-түлік"
+    },
+    {
+      "candidates": [
+        "а-а<ij>"
+      ],
+      "normalized": "а-а",
+      "surface": "а-а"
+    },
+    {
+      "candidates": [
+        "51<num><percent><abl>"
+      ],
+      "normalized": "51%-дан",
+      "surface": "51%-дан"
+    },
+    {
+      "candidates": [
+        "мына<prn><dem><nom>+ма<qst>+е<cop><aor><evid><p3><pl>",
+        "мына<prn><dem><nom>+ма<qst>+е<cop><aor><evid><p3><sg>"
+      ],
+      "normalized": "мына мекен",
+      "surface": "мына мекен"
+    },
+    {
+      "candidates": [
+        "жоқ<adj>+е<cop><aor><p3><pl>+ғой<mod_ass>",
+        "жоқ<adj>+е<cop><aor><p3><sg>+ғой<mod_ass>",
+        "жоқ<adj>+ғой<mod_ass>",
+        "жоқ<adj><subst><nom>+е<cop><aor><p3><pl>+ғой<mod_ass>",
+        "жоқ<adj><subst><nom>+е<cop><aor><p3><sg>+ғой<mod_ass>",
+        "жоқ<adj><subst><nom>+ғой<mod_ass>"
+      ],
+      "normalized": "жоқ қой",
+      "surface": "жоқ қой"
+    },
+    {
+      "candidates": [],
+      "normalized": "С",
+      "surface": "С"
+    },
+    {
+      "candidates": [],
+      "normalized": "°С",
+      "surface": "°С"
+    },
+    {
+      "candidates": [
+        "12345<num>",
+        "12345<num><subst><nom>"
+      ],
+      "normalized": "12345",
+      "surface": "12345"
+    },
+    {
+      "candidates": [],
+      "normalized": "2026-жыл",
+      "surface": "2026-жыл"
+    },
+    {
+      "candidates": [
+        "қазақ<n><equ>",
+        "қазақ<n><equ>+е<cop><aor><p3><pl>",
+        "қазақ<n><equ>+е<cop><aor><p3><sg>",
+        "қазақша<adv>",
+        "қазақша<n><attr>",
+        "қазақша<n><nom>",
+        "қазақша<n><nom>+е<cop><aor><p3><pl>",
+        "қазақша<n><nom>+е<cop><aor><p3><sg>"
+      ],
+      "normalized": "қазақша",
+      "surface": "қазақша"
+    },
+    {
+      "candidates": [
+        "оқу<adj>",
+        "оқу<adj>+е<cop><aor><p3><pl>",
+        "оқу<adj>+е<cop><aor><p3><sg>",
+        "оқу<adj><advl>",
+        "оқу<adj><subst><nom>",
+        "оқу<adj><subst><nom>+е<cop><aor><p3><pl>",
+        "оқу<adj><subst><nom>+е<cop><aor><p3><sg>",
+        "оқу<n><attr>",
+        "оқу<n><nom>",
+        "оқу<n><nom>+е<cop><aor><p3><pl>",
+        "оқу<n><nom>+е<cop><aor><p3><sg>",
+        "оқы<v><iv><ger><nom>",
+        "оқы<v><tv><ger><nom>"
+      ],
+      "normalized": "оқу",
+      "surface": "оқу"
+    },
+    {
+      "candidates": [
+        "жаз<v><tv><neg><past><p1><pl>"
+      ],
+      "normalized": "жазбағанбыз",
+      "surface": "жазбағанбыз"
+    },
+    {
+      "candidates": [
+        "аузы<n><attr>",
+        "аузы<n><nom>",
+        "аузы<n><nom>+е<cop><aor><p3><pl>",
+        "аузы<n><nom>+е<cop><aor><p3><sg>",
+        "ауыз<n><px3sp><nom>",
+        "ауыз<n><px3sp><nom>+е<cop><aor><p3><pl>",
+        "ауыз<n><px3sp><nom>+е<cop><aor><p3><sg>"
+      ],
+      "normalized": "аузы",
+      "surface": "аузы"
+    },
+    {
+      "candidates": [
+        "орын<n><px3sp><nom>",
+        "орын<n><px3sp><nom>+е<cop><aor><p3><pl>",
+        "орын<n><px3sp><nom>+е<cop><aor><p3><sg>"
+      ],
+      "normalized": "орны",
+      "surface": "орны"
+    },
+    {
+      "candidates": [],
+      "normalized": "C++",
+      "surface": "C++"
+    },
+    {
+      "candidates": [],
+      "normalized": "[]{}^$/\\<>@#*+",
+      "surface": "[]{}^$/\\<>@#*+"
+    },
+    {
+      "candidates": [],
+      "normalized": "алмасөз",
+      "surface": "алмасөз"
+    },
+    {
+      "candidates": [],
+      "normalized": "😀",
+      "surface": "😀"
+    },
+    {
+      "candidates": [],
+      "normalized": "кіта́п",
+      "surface": "кіта́п"
+    }
+  ],
+  "schema": "kazstem.browser-native-probe-ledger.v1"
+}

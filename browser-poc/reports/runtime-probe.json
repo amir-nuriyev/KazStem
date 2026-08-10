@@ -1,0 +1,338 @@
+{
+  "schema": "kazstem.browser-runtime-probe.v1",
+  "ordered_candidate_arrays_equal": true,
+  "probe_count": 24,
+  "init_ms": 1.3452930000000016,
+  "probe_ms": 2.1144810000000014,
+  "benchmark": {
+    "iterations": 500,
+    "code_points": 78500,
+    "elapsed_ms": 94.615828,
+    "code_points_per_second": 829670.9087616926
+  },
+  "memory_bytes": {
+    "before": {
+      "rss": 46661632,
+      "heapTotal": 5869568,
+      "heapUsed": 4648608,
+      "external": 1756134,
+      "arrayBuffers": 18765
+    },
+    "after_init": {
+      "rss": 48234496,
+      "heapTotal": 5869568,
+      "heapUsed": 4770392,
+      "external": 3656536,
+      "arrayBuffers": 1919127
+    },
+    "after_benchmark": {
+      "rss": 59654144,
+      "heapTotal": 7442432,
+      "heapUsed": 5273312,
+      "external": 3648282,
+      "arrayBuffers": 1910873
+    }
+  },
+  "comparisons": [
+    {
+      "surface": "Қазақстанның",
+      "native": [
+        "Қазақстан<np><top><gen>"
+      ],
+      "browser": [
+        "Қазақстан<np><top><gen>"
+      ],
+      "ordered_equal": true
+    },
+    {
+      "surface": "кітап",
+      "native": [
+        "кітап<n><attr>",
+        "кітап<n><nom>",
+        "кітап<n><nom>+е<cop><aor><p3><pl>",
+        "кітап<n><nom>+е<cop><aor><p3><sg>"
+      ],
+      "browser": [
+        "кітап<n><attr>",
+        "кітап<n><nom>",
+        "кітап<n><nom>+е<cop><aor><p3><pl>",
+        "кітап<n><nom>+е<cop><aor><p3><sg>"
+      ],
+      "ordered_equal": true
+    },
+    {
+      "surface": "кітабы",
+      "native": [
+        "кітап<n><px3sp><nom>",
+        "кітап<n><px3sp><nom>+е<cop><aor><p3><pl>",
+        "кітап<n><px3sp><nom>+е<cop><aor><p3><sg>"
+      ],
+      "browser": [
+        "кітап<n><px3sp><nom>",
+        "кітап<n><px3sp><nom>+е<cop><aor><p3><pl>",
+        "кітап<n><px3sp><nom>+е<cop><aor><p3><sg>"
+      ],
+      "ordered_equal": true
+    },
+    {
+      "surface": "кітаптарымыздан",
+      "native": [
+        "кітап<n><pl><px1pl><abl>",
+        "кітап<n><pl><px1pl><abl>+е<cop><aor><p3><pl>",
+        "кітап<n><pl><px1pl><abl>+е<cop><aor><p3><sg>"
+      ],
+      "browser": [
+        "кітап<n><pl><px1pl><abl>",
+        "кітап<n><pl><px1pl><abl>+е<cop><aor><p3><pl>",
+        "кітап<n><pl><px1pl><abl>+е<cop><aor><p3><sg>"
+      ],
+      "ordered_equal": true
+    },
+    {
+      "surface": "сөз-ау",
+      "native": [
+        "сөз<n><nom>+ау<mod_emo>",
+        "сөз<n><nom>+е<cop><aor><p3><pl>+ау<mod_emo>",
+        "сөз<n><nom>+е<cop><aor><p3><sg>+ау<mod_emo>"
+      ],
+      "browser": [
+        "сөз<n><nom>+ау<mod_emo>",
+        "сөз<n><nom>+е<cop><aor><p3><pl>+ау<mod_emo>",
+        "сөз<n><nom>+е<cop><aor><p3><sg>+ау<mod_emo>"
+      ],
+      "ordered_equal": true
+    },
+    {
+      "surface": "азық-түлік",
+      "native": [
+        "азық-түлік<n><attr>",
+        "азық-түлік<n><nom>",
+        "азық-түлік<n><nom>+е<cop><aor><p3><pl>",
+        "азық-түлік<n><nom>+е<cop><aor><p3><sg>"
+      ],
+      "browser": [
+        "азық-түлік<n><attr>",
+        "азық-түлік<n><nom>",
+        "азық-түлік<n><nom>+е<cop><aor><p3><pl>",
+        "азық-түлік<n><nom>+е<cop><aor><p3><sg>"
+      ],
+      "ordered_equal": true
+    },
+    {
+      "surface": "а-а",
+      "native": [
+        "а-а<ij>"
+      ],
+      "browser": [
+        "а-а<ij>"
+      ],
+      "ordered_equal": true
+    },
+    {
+      "surface": "51%-дан",
+      "native": [
+        "51<num><percent><abl>"
+      ],
+      "browser": [
+        "51<num><percent><abl>"
+      ],
+      "ordered_equal": true
+    },
+    {
+      "surface": "мына мекен",
+      "native": [
+        "мына<prn><dem><nom>+ма<qst>+е<cop><aor><evid><p3><pl>",
+        "мына<prn><dem><nom>+ма<qst>+е<cop><aor><evid><p3><sg>"
+      ],
+      "browser": [
+        "мына<prn><dem><nom>+ма<qst>+е<cop><aor><evid><p3><pl>",
+        "мына<prn><dem><nom>+ма<qst>+е<cop><aor><evid><p3><sg>"
+      ],
+      "ordered_equal": true
+    },
+    {
+      "surface": "жоқ қой",
+      "native": [
+        "жоқ<adj>+е<cop><aor><p3><pl>+ғой<mod_ass>",
+        "жоқ<adj>+е<cop><aor><p3><sg>+ғой<mod_ass>",
+        "жоқ<adj>+ғой<mod_ass>",
+        "жоқ<adj><subst><nom>+е<cop><aor><p3><pl>+ғой<mod_ass>",
+        "жоқ<adj><subst><nom>+е<cop><aor><p3><sg>+ғой<mod_ass>",
+        "жоқ<adj><subst><nom>+ғой<mod_ass>"
+      ],
+      "browser": [
+        "жоқ<adj>+е<cop><aor><p3><pl>+ғой<mod_ass>",
+        "жоқ<adj>+е<cop><aor><p3><sg>+ғой<mod_ass>",
+        "жоқ<adj>+ғой<mod_ass>",
+        "жоқ<adj><subst><nom>+е<cop><aor><p3><pl>+ғой<mod_ass>",
+        "жоқ<adj><subst><nom>+е<cop><aor><p3><sg>+ғой<mod_ass>",
+        "жоқ<adj><subst><nom>+ғой<mod_ass>"
+      ],
+      "ordered_equal": true
+    },
+    {
+      "surface": "С",
+      "native": [],
+      "browser": [],
+      "ordered_equal": true
+    },
+    {
+      "surface": "°С",
+      "native": [],
+      "browser": [],
+      "ordered_equal": true
+    },
+    {
+      "surface": "12345",
+      "native": [
+        "12345<num>",
+        "12345<num><subst><nom>"
+      ],
+      "browser": [
+        "12345<num>",
+        "12345<num><subst><nom>"
+      ],
+      "ordered_equal": true
+    },
+    {
+      "surface": "2026-жыл",
+      "native": [],
+      "browser": [],
+      "ordered_equal": true
+    },
+    {
+      "surface": "қазақша",
+      "native": [
+        "қазақ<n><equ>",
+        "қазақ<n><equ>+е<cop><aor><p3><pl>",
+        "қазақ<n><equ>+е<cop><aor><p3><sg>",
+        "қазақша<adv>",
+        "қазақша<n><attr>",
+        "қазақша<n><nom>",
+        "қазақша<n><nom>+е<cop><aor><p3><pl>",
+        "қазақша<n><nom>+е<cop><aor><p3><sg>"
+      ],
+      "browser": [
+        "қазақ<n><equ>",
+        "қазақ<n><equ>+е<cop><aor><p3><pl>",
+        "қазақ<n><equ>+е<cop><aor><p3><sg>",
+        "қазақша<adv>",
+        "қазақша<n><attr>",
+        "қазақша<n><nom>",
+        "қазақша<n><nom>+е<cop><aor><p3><pl>",
+        "қазақша<n><nom>+е<cop><aor><p3><sg>"
+      ],
+      "ordered_equal": true
+    },
+    {
+      "surface": "оқу",
+      "native": [
+        "оқу<adj>",
+        "оқу<adj>+е<cop><aor><p3><pl>",
+        "оқу<adj>+е<cop><aor><p3><sg>",
+        "оқу<adj><advl>",
+        "оқу<adj><subst><nom>",
+        "оқу<adj><subst><nom>+е<cop><aor><p3><pl>",
+        "оқу<adj><subst><nom>+е<cop><aor><p3><sg>",
+        "оқу<n><attr>",
+        "оқу<n><nom>",
+        "оқу<n><nom>+е<cop><aor><p3><pl>",
+        "оқу<n><nom>+е<cop><aor><p3><sg>",
+        "оқы<v><iv><ger><nom>",
+        "оқы<v><tv><ger><nom>"
+      ],
+      "browser": [
+        "оқу<adj>",
+        "оқу<adj>+е<cop><aor><p3><pl>",
+        "оқу<adj>+е<cop><aor><p3><sg>",
+        "оқу<adj><advl>",
+        "оқу<adj><subst><nom>",
+        "оқу<adj><subst><nom>+е<cop><aor><p3><pl>",
+        "оқу<adj><subst><nom>+е<cop><aor><p3><sg>",
+        "оқу<n><attr>",
+        "оқу<n><nom>",
+        "оқу<n><nom>+е<cop><aor><p3><pl>",
+        "оқу<n><nom>+е<cop><aor><p3><sg>",
+        "оқы<v><iv><ger><nom>",
+        "оқы<v><tv><ger><nom>"
+      ],
+      "ordered_equal": true
+    },
+    {
+      "surface": "жазбағанбыз",
+      "native": [
+        "жаз<v><tv><neg><past><p1><pl>"
+      ],
+      "browser": [
+        "жаз<v><tv><neg><past><p1><pl>"
+      ],
+      "ordered_equal": true
+    },
+    {
+      "surface": "аузы",
+      "native": [
+        "аузы<n><attr>",
+        "аузы<n><nom>",
+        "аузы<n><nom>+е<cop><aor><p3><pl>",
+        "аузы<n><nom>+е<cop><aor><p3><sg>",
+        "ауыз<n><px3sp><nom>",
+        "ауыз<n><px3sp><nom>+е<cop><aor><p3><pl>",
+        "ауыз<n><px3sp><nom>+е<cop><aor><p3><sg>"
+      ],
+      "browser": [
+        "аузы<n><attr>",
+        "аузы<n><nom>",
+        "аузы<n><nom>+е<cop><aor><p3><pl>",
+        "аузы<n><nom>+е<cop><aor><p3><sg>",
+        "ауыз<n><px3sp><nom>",
+        "ауыз<n><px3sp><nom>+е<cop><aor><p3><pl>",
+        "ауыз<n><px3sp><nom>+е<cop><aor><p3><sg>"
+      ],
+      "ordered_equal": true
+    },
+    {
+      "surface": "орны",
+      "native": [
+        "орын<n><px3sp><nom>",
+        "орын<n><px3sp><nom>+е<cop><aor><p3><pl>",
+        "орын<n><px3sp><nom>+е<cop><aor><p3><sg>"
+      ],
+      "browser": [
+        "орын<n><px3sp><nom>",
+        "орын<n><px3sp><nom>+е<cop><aor><p3><pl>",
+        "орын<n><px3sp><nom>+е<cop><aor><p3><sg>"
+      ],
+      "ordered_equal": true
+    },
+    {
+      "surface": "C++",
+      "native": [],
+      "browser": [],
+      "ordered_equal": true
+    },
+    {
+      "surface": "[]{}^$/\\<>@#*+",
+      "native": [],
+      "browser": [],
+      "ordered_equal": true
+    },
+    {
+      "surface": "алмасөз",
+      "native": [],
+      "browser": [],
+      "ordered_equal": true
+    },
+    {
+      "surface": "😀",
+      "native": [],
+      "browser": [],
+      "ordered_equal": true
+    },
+    {
+      "surface": "кіта́п",
+      "native": [],
+      "browser": [],
+      "ordered_equal": true
+    }
+  ]
+}

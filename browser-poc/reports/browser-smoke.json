@@ -1,0 +1,23 @@
+{
+  "schema": "kazstem.browser-smoke.v1",
+  "runner": "playwright-cli/chromium",
+  "url": "http://127.0.0.1:8765/",
+  "cache_identity": "kazstem-browser-d0df783b4a51-v4",
+  "checks": {
+    "analyzer_ready": true,
+    "valid_jsonl_codepoint_offsets": {
+      "emoji": [0, 1],
+      "space": [1, 2],
+      "word": [2, 7]
+    },
+    "successful_result_enables_download": true,
+    "xml_nul_error": "XML output token text contains XML 1.0-forbidden U+0000 at character 0",
+    "failed_result_length": 0,
+    "failed_download_disabled": true,
+    "console_errors": 0,
+    "precache_asset_count": 18,
+    "probe_ledger_summary_precached": true,
+    "manifest_language_en": true
+  },
+  "result": "pass"
+}

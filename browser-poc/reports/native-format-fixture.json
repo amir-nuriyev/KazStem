@@ -1,0 +1,146 @@
+{
+  "analysis": {
+    "features": {
+      "Case": "Abl",
+      "Number": "Plur",
+      "Number[psor]": "Plur",
+      "Person[psor]": "1"
+    },
+    "guessed": false,
+    "lemma": "кітап",
+    "morphemes": [
+      {
+        "features": {
+          "Case": "Abl",
+          "Number": "Plur",
+          "Number[psor]": "Plur",
+          "Person[psor]": "1"
+        },
+        "lemma": "кітап",
+        "tags": [
+          "n",
+          "pl",
+          "px1pl",
+          "abl"
+        ],
+        "upos": "NOUN"
+      }
+    ],
+    "orthographic_variant": false,
+    "raw": "кітап<n><pl><px1pl><abl>",
+    "schema_version": "qazmorph.analysis.v1",
+    "score": null,
+    "source": "lexicon",
+    "tags": [
+      "n",
+      "pl",
+      "px1pl",
+      "abl"
+    ],
+    "upos": "NOUN"
+  },
+  "casefold_examples": [
+    {
+      "expected": "ii̇ssσσ",
+      "input": "IİßΣς"
+    },
+    {
+      "expected": "қазақстан",
+      "input": "ҚАЗАҚСТАН"
+    },
+    {
+      "expected": "strasse",
+      "input": "Straße"
+    },
+    {
+      "expected": "ffi",
+      "input": "ﬃ"
+    }
+  ],
+  "document": {
+    "normalized_text": "😀 кіта́п\r\nкітап.",
+    "span": {
+      "end": 15,
+      "normalized": "кіта́п\r\nкітап",
+      "selected": 0,
+      "sentence_end": false,
+      "start": 2,
+      "text": "кіта́п\r\nкітап",
+      "token_end": 5,
+      "token_start": 2
+    },
+    "text": "😀 кіта́п\r\nкітап.",
+    "tokens": [
+      {
+        "analysis_kind": null,
+        "end": 1,
+        "kind": "symbol",
+        "normalized": null,
+        "selected": null,
+        "sentence_end": false,
+        "start": 0,
+        "text": "😀"
+      },
+      {
+        "analysis_kind": null,
+        "end": 2,
+        "kind": "space",
+        "normalized": null,
+        "selected": null,
+        "sentence_end": false,
+        "start": 1,
+        "text": " "
+      },
+      {
+        "analysis_kind": "unknown",
+        "end": 8,
+        "kind": "word",
+        "normalized": null,
+        "selected": 0,
+        "sentence_end": false,
+        "start": 2,
+        "text": "кіта́п"
+      },
+      {
+        "analysis_kind": null,
+        "end": 10,
+        "kind": "space",
+        "normalized": null,
+        "selected": null,
+        "sentence_end": false,
+        "start": 8,
+        "text": "\r\n"
+      },
+      {
+        "analysis_kind": "known",
+        "end": 15,
+        "kind": "word",
+        "normalized": null,
+        "selected": 0,
+        "sentence_end": false,
+        "start": 10,
+        "text": "кітап"
+      },
+      {
+        "analysis_kind": null,
+        "end": 16,
+        "kind": "punct",
+        "normalized": null,
+        "selected": null,
+        "sentence_end": true,
+        "start": 15,
+        "text": "."
+      }
+    ]
+  },
+  "expected": {
+    "conllu": "1\t😀\t_\tX\t_\t_\t_\t_\t_\tStartChar=0|EndChar=1\n2\tкіта́п\tкіта́п\tX\t_\t_\t_\t_\t_\tStartChar=2|EndChar=8|Guess=Yes\n3\tкітап\tкітап\tNOUN\t_\tCase=Abl|Number=Plur|Number[psor]=Plur|Person[psor]=1\t_\t_\t_\tStartChar=10|EndChar=15\n4\t.\t_\tPUNCT\t_\t_\t_\t_\t_\tStartChar=15|EndChar=16\n\n",
+    "json": "[{\"text\":\"😀\"},{\"text\":\" \"},{\"text\":\"кіта́п\",\"analysis\":[{\"lex\":\"кіта́п\",\"gr\":\"X\",\"qual\":\"bastard\"}]},{\"text\":\"\\r\\n\"},{\"text\":\"кітап\",\"analysis\":[{\"lex\":\"кітап\",\"gr\":\"NOUN,Case=Abl,Number=Plur,Number[psor]=Plur,Person[psor]=1\"}]},{\"text\":\".\"}]\n",
+    "jsonl": "{\"schema_version\":\"qazmorph.jsonl-record.v2\",\"record_type\":\"token\",\"consumes_input\":true,\"token_index\":0,\"text\":\"😀\",\"start\":0,\"end\":1,\"kind\":\"symbol\",\"normalized\":null,\"mode\":\"lattice\",\"resource_version\":\"fixture\",\"ud_profile\":\"universal\",\"analysis\":[],\"selected\":null,\"sentence_end\":false}\n{\"schema_version\":\"qazmorph.jsonl-record.v2\",\"record_type\":\"token\",\"consumes_input\":true,\"token_index\":1,\"text\":\" \",\"start\":1,\"end\":2,\"kind\":\"space\",\"normalized\":null,\"mode\":\"lattice\",\"resource_version\":\"fixture\",\"ud_profile\":\"universal\",\"analysis\":[],\"selected\":null,\"sentence_end\":false}\n{\"schema_version\":\"qazmorph.jsonl-record.v2\",\"record_type\":\"token\",\"consumes_input\":true,\"token_index\":2,\"text\":\"кіта́п\",\"start\":2,\"end\":8,\"kind\":\"word\",\"normalized\":null,\"mode\":\"lattice\",\"resource_version\":\"fixture\",\"ud_profile\":\"universal\",\"analysis\":[{\"schema_version\":\"qazmorph.analysis.v1\",\"lemma\":\"кіта́п\",\"upos\":\"X\",\"features\":{},\"tags\":[\"unknown\"],\"morphemes\":[{\"lemma\":\"кіта́п\",\"tags\":[\"unknown\"],\"upos\":\"X\",\"features\":{}}],\"raw\":\"кіта́п<unknown>\",\"source\":\"unknown\",\"score\":null,\"guessed\":true,\"orthographic_variant\":false,\"lex\":\"кіта́п\",\"gr\":\"X\",\"qual\":\"guessed\"}],\"selected\":0,\"sentence_end\":false}\n{\"schema_version\":\"qazmorph.jsonl-record.v2\",\"record_type\":\"token\",\"consumes_input\":true,\"token_index\":3,\"text\":\"\\r\\n\",\"start\":8,\"end\":10,\"kind\":\"space\",\"normalized\":null,\"mode\":\"lattice\",\"resource_version\":\"fixture\",\"ud_profile\":\"universal\",\"analysis\":[],\"selected\":null,\"sentence_end\":false}\n{\"schema_version\":\"qazmorph.jsonl-record.v2\",\"record_type\":\"token\",\"consumes_input\":true,\"token_index\":4,\"text\":\"кітап\",\"start\":10,\"end\":15,\"kind\":\"word\",\"normalized\":null,\"mode\":\"lattice\",\"resource_version\":\"fixture\",\"ud_profile\":\"universal\",\"analysis\":[{\"schema_version\":\"qazmorph.analysis.v1\",\"lemma\":\"кітап\",\"upos\":\"NOUN\",\"features\":{\"Case\":\"Abl\",\"Number\":\"Plur\",\"Number[psor]\":\"Plur\",\"Person[psor]\":\"1\"},\"tags\":[\"n\",\"pl\",\"px1pl\",\"abl\"],\"morphemes\":[{\"lemma\":\"кітап\",\"tags\":[\"n\",\"pl\",\"px1pl\",\"abl\"],\"upos\":\"NOUN\",\"features\":{\"Case\":\"Abl\",\"Number\":\"Plur\",\"Number[psor]\":\"Plur\",\"Person[psor]\":\"1\"}}],\"raw\":\"кітап<n><pl><px1pl><abl>\",\"source\":\"lexicon\",\"score\":null,\"guessed\":false,\"orthographic_variant\":false,\"lex\":\"кітап\",\"gr\":\"NOUN,Case=Abl,Number=Plur,Number[psor]=Plur,Person[psor]=1\",\"qual\":null}],\"selected\":0,\"sentence_end\":false}\n{\"schema_version\":\"qazmorph.jsonl-record.v2\",\"record_type\":\"token\",\"consumes_input\":true,\"token_index\":5,\"text\":\".\",\"start\":15,\"end\":16,\"kind\":\"punct\",\"normalized\":null,\"mode\":\"lattice\",\"resource_version\":\"fixture\",\"ud_profile\":\"universal\",\"analysis\":[],\"selected\":null,\"sentence_end\":true}\n{\"schema_version\":\"qazmorph.jsonl-record.v2\",\"record_type\":\"analysis_span\",\"consumes_input\":false,\"span_index\":0,\"text\":\"кіта́п\\r\\nкітап\",\"start\":2,\"end\":15,\"token_start\":2,\"token_end\":5,\"normalized\":\"кіта́п\\r\\nкітап\",\"mode\":\"lattice\",\"resource_version\":\"fixture\",\"ud_profile\":\"universal\",\"analysis\":[{\"schema_version\":\"qazmorph.analysis.v1\",\"lemma\":\"кітап\",\"upos\":\"NOUN\",\"features\":{\"Case\":\"Abl\",\"Number\":\"Plur\",\"Number[psor]\":\"Plur\",\"Person[psor]\":\"1\"},\"tags\":[\"n\",\"pl\",\"px1pl\",\"abl\"],\"morphemes\":[{\"lemma\":\"кітап\",\"tags\":[\"n\",\"pl\",\"px1pl\",\"abl\"],\"upos\":\"NOUN\",\"features\":{\"Case\":\"Abl\",\"Number\":\"Plur\",\"Number[psor]\":\"Plur\",\"Person[psor]\":\"1\"}}],\"raw\":\"кітап<n><pl><px1pl><abl>\",\"source\":\"lexicon\",\"score\":null,\"guessed\":false,\"orthographic_variant\":false,\"lex\":\"кітап\",\"gr\":\"NOUN,Case=Abl,Number=Plur,Number[psor]=Plur,Person[psor]=1\",\"qual\":null}],\"selected\":0,\"sentence_end\":false}\n",
+    "text": "😀 кіта́п{кіта́п?=X}\r\nкітап{кітап=NOUN,Case=Abl,Number=Plur,Number[psor]=Plur,Person[psor]=1}.",
+    "xml": "<?xml version=\"1.0\" encoding=\"UTF-8\"?><html><body><se>😀 <w>кіта́п<ana lex=\"кіта́п\" qual=\"bastard\" gr=\"X\" /></w>\r\n<w>кітап<ana lex=\"кітап\" gr=\"NOUN,Case=Abl,Number=Plur,Number[psor]=Plur,Person[psor]=1\" /></w>.</se></body></html>\n"
+  },
+  "raw_analysis": "кітап<n><pl><px1pl><abl>",
+  "schema": "kazstem.browser-native-format-fixture.v1",
+  "xml_nul_error": "XML output token text contains XML 1.0-forbidden code point U+0000 at character 0"
+}

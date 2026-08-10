@@ -4,6 +4,12 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](LICENSE)
 
+[**Try KazStem in your browser**](https://amir-nuriyev.github.io/KazStem/)
+— a zero-install, client-only lattice-analysis proof of concept with local file
+upload, offline caching, and no analytics or server-side text processing. The
+page names its current parity limits and leaves unsupported contextual and
+generation modes disabled.
+
 **KazStem** is an ambiguity-preserving morphological analyzer and generator for
 Kazakh. Its primary command is `kazstem`; the compatibility commands
 `qazmorph` and `mystem-kz`, and the existing Python import package `qazmorph`,

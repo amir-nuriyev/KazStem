@@ -1,0 +1,114 @@
+{
+  "att_symbol_audit": {
+    "flag_diacritics": [],
+    "identity_symbols": [],
+    "meta_symbols": [
+      "@0@",
+      "@_SPACE_@"
+    ],
+    "unknown_symbols": []
+  },
+  "browser_runtime_ledger": {
+    "benchmark": {
+      "code_points": 259293,
+      "code_points_per_second": 1307308.4766965015,
+      "elapsed_ms": 198.34109899999999,
+      "iterations": 1
+    },
+    "bytes": 9068339,
+    "init_ms": 6.852305000000001,
+    "memory_bytes": {
+      "after_benchmark": {
+        "arrayBuffers": 1916981,
+        "external": 3820391,
+        "heapTotal": 59617280,
+        "heapUsed": 26397752,
+        "rss": 113651712
+      },
+      "after_init": {
+        "arrayBuffers": 1927466,
+        "external": 3830876,
+        "heapTotal": 5869568,
+        "heapUsed": 5296272,
+        "rss": 55050240
+      },
+      "before": {
+        "arrayBuffers": 27104,
+        "external": 1930474,
+        "heapTotal": 5869568,
+        "heapUsed": 5086152,
+        "rss": 47185920
+      }
+    },
+    "path": "full-runtime-probe.json",
+    "probe_ms": 263.145716,
+    "sha256": "f8591417cd923a283e37fa1db941a845b3081155dafa064cc1a4e468f67e67e5"
+  },
+  "comparison": "exact ordered raw candidate arrays after NFC normalization",
+  "compressed_exact_ledgers": {
+    "browser": {
+      "bytes": 497465,
+      "path": "full-runtime-probe.json.gz",
+      "sha256": "c47523c26f7e34f70734a18a2608b0d7ca638b0c755dfc715bb528c1d6712b14"
+    },
+    "native": {
+      "bytes": 508507,
+      "path": "full-native-ledger.json.gz",
+      "sha256": "74d3645941c0b4759a8bacf952c41de233713127a4302cf2904ac3fa7c65ada5"
+    }
+  },
+  "malformed_and_cap_tests": {
+    "assertions": 8,
+    "bytes": 88,
+    "path": "malformed-resource.json",
+    "result": "pass",
+    "schema": "kazstem.browser-malformed-resource-tests.v1",
+    "sha256": "800dc6ac34348b5675e05d2ee47a7e875df54e4d0cf5441c00b8f97fd9779eab"
+  },
+  "native_ledger": {
+    "bytes": 6214222,
+    "path": "full-native-ledger.json",
+    "sha256": "c6bd40d027dbd6bc9b77132e932c6880509836d5edf855684e77e1e6b7d8f600"
+  },
+  "probe_count": 31568,
+  "resource_sha256": "d0df783b4a51eef7db513662ca2fb4ae2d78f7c78ca7b4b797e84e72ccc3c4c0",
+  "resource_sha256_verified_before_constructor": true,
+  "result": "pass",
+  "schema": "kazstem.browser-probe-ledger-summary.v1",
+  "surface_inventory": {
+    "bytes": 594873,
+    "counts": {
+      "base": 24,
+      "excluded_over_256_code_points": 0,
+      "ktb_distinct_forms": 4642,
+      "normalized_distinct": 31568,
+      "raw_distinct_whitespace_types": 29242,
+      "source_union": 31568
+    },
+    "path": "full-surface-inventory.json",
+    "sha256": "121d4d55498694f66453eeb42532764d2f051f49cf99484d068aa595349829f5",
+    "sources": {
+      "base_probes": {
+        "path": "browser-probes.json",
+        "sha256": "cc895490386dbf45fceee8fceb59dfd039cdf38891a4320cb774c161c97991c9"
+      },
+      "ktb": [
+        {
+          "bytes": 40712,
+          "path": "kk_ktb-ud-train.conllu",
+          "sha256": "6297597914a3f319db573573f927a6577c702f5fa00dcd653162aab46026aeaa"
+        },
+        {
+          "bytes": 809028,
+          "path": "kk_ktb-ud-test.conllu",
+          "sha256": "1100846ee50c2f970562a21dca8415a381c470ea06bdb8496ae213d59c3a3c4e"
+        }
+      ],
+      "raw": {
+        "bytes": 1184475,
+        "path": "multidomain_5000_prefix_8efcab.txt",
+        "sha256": "8efcab8460023829a2d8907d15df31fdbcb96226d4b540f5bf53133a1f02df5e"
+      }
+    }
+  }
+}

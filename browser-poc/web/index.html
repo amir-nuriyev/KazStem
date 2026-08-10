@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#153d36">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'">
+  <title>KazStem Browser POC</title>
+  <link rel="stylesheet" href="./styles.css">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
+</head>
+<body>
+  <header class="site-header">
+    <div>
+      <p class="eyebrow">Local Kazakh morphology</p>
+      <h1>KazStem Browser</h1>
+      <p class="lede">A zero-install, client-only proof of concept. Your text never leaves this browser.</p>
+    </div>
+    <div class="status-card" aria-live="polite">
+      <span class="status-dot" aria-hidden="true"></span>
+      <span id="runtime-status">Loading verified analyzer…</span>
+    </div>
+  </header>
+
+  <main>
+    <section class="notice" aria-labelledby="poc-title">
+      <h2 id="poc-title">Proof-of-concept boundary</h2>
+      <p>Ordered dictionary candidates match the native immutable probe ledger. Full <code>hfst-proc</code> document partition/MWE parity, productive OOV, Constraint Grammar, neural ranking, and generation are not enabled. Unknown words are labeled unknown; no unsupported mode is approximated silently.</p>
+    </section>
+
+    <section class="workspace" aria-label="Analyzer workspace">
+      <div class="input-panel">
+        <div class="section-heading">
+          <div>
+            <p class="step">1 · Input</p>
+            <h2>Paste or choose text</h2>
+          </div>
+          <span id="input-size">0 characters</span>
+        </div>
+
+        <label class="drop-zone" id="drop-zone" for="file-input">
+          <strong>Drop a UTF-8 text file</strong>
+          <span>or choose one; chunk-decoded with backpressure, then buffered in the worker (POC limit 4 MiB)</span>
+          <input id="file-input" type="file" accept=".txt,.text,.csv,.tsv,.conllu,text/plain,text/csv">
+        </label>
+        <p id="file-name" class="file-name" aria-live="polite">No file selected</p>
+
+        <label for="source-text">Text</label>
+        <textarea id="source-text" rows="11" spellcheck="false">Қазақстанның кітаптарымыздан жазбағанбыз.
+мына мекен жоқ қой</textarea>
+
+        <div class="controls">
+          <label for="format">Output format</label>
+          <select id="format">
+            <option value="jsonl" selected>JSONL v2 (lossless)</option>
+            <option value="text">MyStem-shaped text</option>
+            <option value="json">MyStem-shaped JSON</option>
+            <option value="xml">MyStem-shaped XML 1.0</option>
+            <option value="conllu">CoNLL-U</option>
+          </select>
+          <button id="analyze" type="button" disabled>Analyze locally</button>
+          <button id="cancel" class="secondary" type="button" hidden>Cancel</button>
+        </div>
+        <p id="progress" class="progress" role="status" aria-live="polite"></p>
+      </div>
+
+      <div class="output-panel">
+        <div class="section-heading">
+          <div>
+            <p class="step">2 · Result</p>
+            <h2>Inspect and download</h2>
+          </div>
+          <button id="download" class="secondary" type="button" disabled>Download result</button>
+        </div>
+        <label class="sr-only" for="result">Analysis result</label>
+        <textarea id="result" rows="24" readonly spellcheck="false" placeholder="Verified local output will appear here."></textarea>
+      </div>
+    </section>
+
+    <section class="identity" aria-labelledby="identity-title">
+      <div>
+        <p class="step">Deterministic identity</p>
+        <h2 id="identity-title">Runtime and proof</h2>
+      </div>
+      <dl>
+        <div><dt>KazStem</dt><dd id="project-id">—</dd></div>
+        <div><dt>Analyzer SHA-256</dt><dd id="resource-id">—</dd></div>
+        <div><dt>apertium-kaz</dt><dd id="source-id">—</dd></div>
+        <div><dt>Probe ledger</dt><dd id="probe-id">—</dd></div>
+        <div><dt>Network</dt><dd id="offline-id">Caching same-origin assets…</dd></div>
+      </dl>
+    </section>
+
+    <section class="about" aria-labelledby="about-title">
+      <h2 id="about-title">Privacy, source, and licenses</h2>
+      <p>No analytics, CDN, API call, cookie, or upload is used. The page fetches only versioned same-origin app/resource files; after the offline cache is complete it can run without a network.</p>
+      <p>KazStem and this modified browser POC are GPL-3.0-or-later. The analyzer data is compiled from the pinned GPL-3.0 <code>apertium-kaz</code> source. See <a href="./legal/SOURCE.md">corresponding source/build instructions</a>, <a href="./legal/kazstem-browser-corresponding-source-0.2.1.tar.gz" download>release-matched corresponding source archive</a>, <a href="./legal/LICENSE">GPL license</a>, and <a href="./legal/THIRD_PARTY.md">third-party notices</a>.</p>
+    </section>
+  </main>
+
+  <footer>
+    <span>KazStem Browser POC</span>
+    <a href="https://github.com/amir-nuriyev/KazStem">Source repository</a>
+  </footer>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
