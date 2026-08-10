@@ -15,9 +15,15 @@ Native-runtime provenance release.
   and macOS dynamic-loader injection diagnostics.
 - Keeps XML escaping byte-compatible while avoiding the unused networking and
   TLS dependency tree pulled in by Python's general-purpose SAX utilities.
+- Matches the empirically audited MyStem 3.1 JSON member and XML element/
+  attribute order for the documented compatibility envelopes.
+- Stable-deduplicates rows that become identical only after the deliberately
+  lossy MyStem text/JSON/XML projection; the Python API and JSONL continue to
+  retain every distinct raw finite-state reading.
 - Prunes the unused generic `hfst-lookup` executable from the ready-run Mac
   runtime while retaining `hfst-proc`, optimized generation, and CG support.
-- Leaves analyzer, generator, OOV, CG, and output-format semantics unchanged.
+- Leaves the analyzer lattice, generator, OOV, and CG morphology unchanged;
+  only the documented MyStem-compatible presentation is tightened as above.
 
 ## 0.2.1 — 2026-08-10
 

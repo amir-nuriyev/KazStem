@@ -26,6 +26,12 @@ its own probability model, and has implementation-specific whitespace and
 chunking. KazStem preserves the caller's exact input instead of inventing a
 newline and uses Kazakh UD projections and only genuine available scores.
 
+Distinct lossless FST readings can project to the same public MyStem row.
+Text, JSON, and XML stable-deduplicate rows that are identical after the
+requested `lex`/`wt`/`qual`/`gr` projection. The Python API and JSONL retain
+every distinct raw reading; this compatibility-only deduplication never
+changes the analyzer lattice or candidate counts.
+
 ## Option matrix
 
 | MyStem interface | KazStem status | Exact KazStem contract |
@@ -46,7 +52,7 @@ newline and uses Kazakh UD projections and only genuine available scores.
 | `--fixlist PATH` | Same purpose, different file grammar | Overrides atomic-token dictionary readings, but accepts validated JSONL or three-column TSV. On a whitespace phrase span the fixlist is append-only so it cannot erase the raw FST lattice. MyStem's Russian bracketed paradigm syntax is not parsed. |
 | `--format text` | MyStem-shaped | Emits `surface{lemma...}` text and preserves physical input line endings even without `-c`. Kazakh grammar labels and score availability differ as described here. |
 | `--format json` | MyStem-shaped | Emits one compact JSON array per invocation, or one object per line with `-n`. Lexical records serialize `analysis` before `text`; analysis items use `lex`, optional `wt`, optional `qual="bastard"`, then optional `gr`. |
-| `--format xml` | MyStem-shaped | Emits the audited `<?xml?><html><body><se><w><ana .../>surface</w></se></body></html>` hierarchy and `lex`, optional `qual`, `gr`, and `wt` attributes. Every emitted text and attribute value is checked against the XML 1.0 character repertoire; unrepresentable values (including NUL, forbidden C0 controls, surrogates, U+FFFE, and U+FFFF) produce a controlled status-2 error. Text/JSON/JSONL remain the lossless transport for those code points. |
+| `--format xml` | MyStem-shaped | Emits the audited `<?xml?><html><body><se><w><ana .../>surface</w></se></body></html>` hierarchy and `lex`, optional `wt`, optional `qual`, then optional `gr` attributes. Every emitted text and attribute value is checked against the XML 1.0 character repertoire; unrepresentable values (including NUL, forbidden C0 controls, surrogates, U+FFFE, and U+FFFF) produce a controlled status-2 error. Text/JSON/JSONL remain the lossless transport for those code points. |
 | `--generate-all` | Safety-bounded | Expands the productive OOV lattice up to 256 hypotheses. MyStem's potentially unbounded behavior is intentionally not claimed. |
 | `--weight` | Field-compatible, different score contract | Places text weight after the lemma and before `=grammar`; JSON/XML use `wt`. A field is emitted only when a scoring layer supplied a value. Unweighted FST/CG readings remain null rather than receiving invented probabilities. |
 

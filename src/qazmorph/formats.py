@@ -204,6 +204,11 @@ def format_text(
             rendered = [
                 _analysis_text(analysis, gram_info=gram_info, weights=weights) for analysis in analyses
             ]
+            # Distinct lossless FST readings can collapse to the same public
+            # MyStem lemma/grammar/weight string. Preserve the full lattice in
+            # JSONL/API output, but do not repeat indistinguishable rows in
+            # this deliberately lossy compatibility projection.
+            rendered = list(dict.fromkeys(rendered))
         body = "|".join(rendered)
         chunks.append(body if lemmas_only else f"{token.text}{{{body}}}")
         if sentence_markers and token.sentence_end:
@@ -245,6 +250,7 @@ def _mystem_analysis_json(
         groups = [[analysis] for analysis in analyses]
 
     rows: list[dict[str, object]] = []
+    seen_rows: set[tuple[tuple[str, object], ...]] = set()
     for group in groups:
         first = group[0]
         row: dict[str, object] = {"lex": first.lemma}
@@ -259,7 +265,10 @@ def _mystem_analysis_json(
         if gram_info:
             grammars = list(dict.fromkeys(_grammar(analysis) for analysis in group))
             row["gr"] = grammars[0] if len(grammars) == 1 else "(" + "|".join(grammars) + ")"
-        rows.append(row)
+        key = tuple(row.items())
+        if key not in seen_rows:
+            seen_rows.add(key)
+            rows.append(row)
     return rows
 
 

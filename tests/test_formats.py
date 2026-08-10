@@ -147,13 +147,13 @@ class TextFormatterTests(unittest.TestCase):
     def test_default_text_output_emits_only_lexical_tokens(self) -> None:
         self.assertEqual(
             format_text(sample_document()),
-            "Сәлем{сәлем|сәлем}",
+            "Сәлем{сәлем}",
         )
 
     def test_copy_input_preserves_spaces_and_punctuation(self) -> None:
         self.assertEqual(
             format_text(sample_document(), copy_input=True),
-            "Сәлем{сәлем|сәлем} !",
+            "Сәлем{сәлем} !",
         )
 
     def test_lemmas_grammar_and_weights_are_independently_selectable(self) -> None:
@@ -223,7 +223,7 @@ class TextFormatterTests(unittest.TestCase):
             format_text(
                 sample_document(), copy_input=True, sentence_markers=True
             ),
-            "Сәлем{сәлем|сәлем} !{\\s}",
+            "Сәлем{сәлем} !{\\s}",
         )
 
     def test_physical_line_endings_survive_without_copy_mode(self) -> None:
@@ -433,7 +433,7 @@ class MyStemJsonFormatterTests(unittest.TestCase):
             "test",
         )
         plain = json.loads(format_mystem_json(document))[0]["analysis"]
-        self.assertEqual(plain, [{"lex": "foo", "qual": "bastard"}] * 2)
+        self.assertEqual(plain, [{"lex": "foo", "qual": "bastard"}])
         merged = json.loads(
             format_mystem_json(
                 document,
@@ -477,6 +477,99 @@ class MyStemJsonFormatterTests(unittest.TestCase):
         self.assertEqual(len(lines), 3)
         self.assertEqual(json.loads(lines[0])["text"], "Сәлем")
         self.assertEqual(json.loads(lines[1]), {"text": " "})
+
+
+class MyStemProjectionDeduplicationTests(unittest.TestCase):
+    def setUp(self) -> None:
+        features = (("Case", "Nom"), ("Number", "Plur"))
+        self.analyses = [
+            make_analysis(
+                "кітап",
+                "NOUN",
+                features=features,
+                tags=("n", "pl", "nom"),
+                raw="кітап<n><pl><nom>",
+            ),
+            make_analysis(
+                "кітап",
+                "NOUN",
+                features=features,
+                tags=("n", "pl", "nom"),
+                raw="кітап<n><nom><pl>",
+            ),
+            make_analysis(
+                "кітап",
+                "NOUN",
+                features=features,
+                tags=("n", "pl", "nom"),
+                raw="кітап<n><pl><nom><attr>",
+            ),
+        ]
+        self.document = Document(
+            "кітаптар",
+            [Token("кітаптар", 0, 8, "word", self.analyses)],
+            "lattice",
+            "test",
+        )
+
+    def test_lossy_mystem_formats_stably_deduplicate_projected_rows(self) -> None:
+        expected = "кітап=NOUN,Case=Nom,Number=Plur"
+        self.assertEqual(format_text(self.document, gram_info=True), f"кітаптар{{{expected}}}")
+
+        json_rows = json.loads(
+            format_mystem_json(self.document, gram_info=True)
+        )
+        self.assertEqual(
+            json_rows[0]["analysis"],
+            [{"lex": "кітап", "gr": "NOUN,Case=Nom,Number=Plur"}],
+        )
+
+        xml_word = ElementTree.fromstring(
+            format_xml(self.document).encode("utf-8")
+        ).find("./body/se/w")
+        self.assertIsNotNone(xml_word)
+        assert xml_word is not None
+        self.assertEqual(len(xml_word.findall("ana")), 1)
+
+    def test_rich_jsonl_retains_every_distinct_raw_reading(self) -> None:
+        row = json.loads(format_jsonl(self.document).splitlines()[0])
+        self.assertEqual(
+            [analysis["raw"] for analysis in row["analysis"]],
+            [analysis.raw for analysis in self.analyses],
+        )
+
+    def test_visible_weight_or_qualifier_differences_are_not_collapsed(self) -> None:
+        weighted = Document(
+            "foo",
+            [
+                Token(
+                    "foo",
+                    0,
+                    3,
+                    "word",
+                    [
+                        make_analysis("foo", "NOUN", raw="foo<n><a>", score=0.4),
+                        make_analysis("foo", "NOUN", raw="foo<n><b>", score=0.6),
+                        make_analysis(
+                            "foo",
+                            "NOUN",
+                            raw="foo<n><c>",
+                            score=0.4,
+                            guessed=True,
+                        ),
+                    ],
+                )
+            ],
+            "lattice",
+            "test",
+        )
+        rows = json.loads(
+            format_mystem_json(weighted, gram_info=True, weights=True)
+        )[0]["analysis"]
+        self.assertEqual(len(rows), 3)
+        self.assertEqual([row.get("wt") for row in rows], [0.4, 0.6, 0.4])
+        self.assertNotIn("qual", rows[0])
+        self.assertEqual(rows[2]["qual"], "bastard")
 
 
 class XmlFormatterTests(unittest.TestCase):
