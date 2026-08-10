@@ -1,0 +1,24 @@
+{
+  "schema": "qazmorph-productive-generator-probes-v1",
+  "description": "Immutable generation-direction probes. Required surfaces are canonical generation paths; forbidden surfaces are analysis-only Dir/LR variants retained by the full productive analyzer.",
+  "probes": [
+    {
+      "class": "canonical_short_instrumental_only",
+      "query": "тосынтүбір<n><ins>",
+      "required_surfaces": ["тосынтүбірмен"],
+      "forbidden_surfaces": ["тосынтүбірменен"]
+    },
+    {
+      "class": "canonical_adjective_comparative_only",
+      "query": "тосынсапа<adj><comp>",
+      "required_surfaces": ["тосынсапарақ"],
+      "forbidden_surfaces": ["тосынсапалау"]
+    },
+    {
+      "class": "canonical_verb_future_plan_only",
+      "query": "тосынет<v><iv><fut_plan><p3><sg>",
+      "required_surfaces": ["тосынетпек"],
+      "forbidden_surfaces": ["тосынетпекші"]
+    }
+  ]
+}

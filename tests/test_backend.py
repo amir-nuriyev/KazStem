@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 import hashlib
 import json
 import os
@@ -10,6 +11,7 @@ from unittest import mock
 
 from qazmorph.backend import (
     _guesser_safety_reason,
+    _has_verified_v4_productive_generator_gate,
     _has_verified_v3_guesser_gate,
     _hyphen_chains,
     _integrity_seal_status,
@@ -18,10 +20,12 @@ from qazmorph.backend import (
     escape_apertium_text,
     FSTBackend,
     GUESSER_FINITE_SCHEMA_V1,
+    GUESSER_FINITE_SCHEMA_V2,
     PINNED_LEGACY_V1_BUNDLE_ID,
     RESOURCE_FILES_BY_SCHEMA,
     RESOURCE_MANIFEST_V2,
     RESOURCE_MANIFEST_V3,
+    RESOURCE_MANIFEST_V4,
     prepare_apertium_text,
     strip_boundary_superblanks,
 )
@@ -158,23 +162,129 @@ class DictionaryGeneratorBoundaryTests(unittest.TestCase):
 
 class ResourceManifestTests(unittest.TestCase):
     @staticmethod
-    def finite_guesser_gate() -> dict[str, object]:
+    def finite_guesser_gate(
+        schema: str = GUESSER_FINITE_SCHEMA_V1,
+    ) -> dict[str, object]:
+        result: dict[str, object] = {
+            "schema": schema,
+            "graph": {"reachable_input_epsilon_cycle": False},
+            "no_cap_probes": {
+                "all_lemmas_match_bounded_root_relation": True,
+                "cycle_markers": 0,
+            },
+            "optimized_runtime": {
+                "full_relation_equivalent_to_standard": True,
+                "candidate_sets_equal_to_standard": True,
+                "cycle_markers": 0,
+            },
+        }
+        if schema == GUESSER_FINITE_SCHEMA_V2:
+            result["baseline_relation"] = {"baseline_subset_of_final": True}
+            result["no_cap_probes"] = {
+                **result["no_cap_probes"],
+                "forbidden_readings_observed": 0,
+                "forbidden_readings_checked": 7,
+                "probes": 363,
+                "deterministic_adversarial_probes": 256,
+                "tracked_readings_missing": [],
+                "bounded_root_relation": {
+                    "unbounded_input_epsilon_root_templates": False,
+                    "noun_high_vowel_syncope": {
+                        "noun_only": True,
+                        "requires_nonempty_surface_suffix": True,
+                    },
+                    "loan_back_harmony": {
+                        "noun_only": True,
+                        "lemma_suffix": "кубок",
+                        "generic_back_harmony_g_to_k": False,
+                    },
+                },
+            }
         return {
             "verification": {
                 "productive_guesser_finite_valued": {
-                    "result": {
-                        "schema": "qazmorph-guesser-finiteness-v1",
-                        "graph": {"reachable_input_epsilon_cycle": False},
-                        "no_cap_probes": {
-                            "all_lemmas_match_bounded_root_relation": True,
-                            "cycle_markers": 0,
-                        },
-                        "optimized_runtime": {
-                            "full_relation_equivalent_to_standard": True,
-                            "candidate_sets_equal_to_standard": True,
-                            "cycle_markers": 0,
-                        },
-                    }
+                    "result": result
+                }
+            }
+        }
+
+    @staticmethod
+    def finite_generator_gate(
+        files: dict[str, object],
+    ) -> dict[str, object]:
+        baseline_probe = {"bytes": 10, "sha256": "a" * 64}
+        direction_probe = {"bytes": 11, "sha256": "b" * 64}
+        equivalent = {
+            "full_relation_equivalent_to_standard": True,
+            "standard_minus_optimized_roundtrip_empty": True,
+            "optimized_roundtrip_minus_standard_empty": True,
+        }
+        return {
+            "productive_generator_finite_valued": {
+                "result": {
+                    "schema": "qazmorph-productive-generator-finiteness-v2",
+                    "inputs": {
+                        "generation_safe_productive_analyzer_standard": {"bytes": 1, "sha256": "5" * 64},
+                        "full_productive_analyzer_standard": {"bytes": 1, "sha256": "6" * 64},
+                        "full_productive_analyzer_optimized": files["kaz.guesser.automorf.hfstol"],
+                        "productive_generator_standard": {"bytes": 1, "sha256": "7" * 64},
+                        "productive_generator_optimized": files["kaz.guesser.autogen.hfstol"],
+                        "dictionary_generator_standard": {"bytes": 1, "sha256": "8" * 64},
+                        "dictionary_generator_optimized": files["kaz.autogen.hfstol"],
+                        "dictionary_analyzer_lexical_to_surface_standard": {"bytes": 1, "sha256": "9" * 64},
+                        "dictionary_analyzer_surface_to_lexical_optimized": files["kaz.automorf.hfstol"],
+                        "baseline_probes": baseline_probe,
+                        "direction_probes": direction_probe,
+                    },
+                    "graph": {"reachable_input_epsilon_cycle": False},
+                    "inverse_relation": {
+                        "generator_inverse_equals_productive_analyzer": True,
+                        "productive_analyzer_minus_generator_inverse_empty": True,
+                        "generator_inverse_minus_productive_analyzer_empty": True,
+                    },
+                    "optimized_runtime": {
+                        **equivalent,
+                        "candidate_sets_equal_to_standard": True,
+                        "standard_optimized_mismatches": [],
+                        "cycle_markers": 0,
+                        "cap_markers": 0,
+                        "queries": 71,
+                    },
+                    "inversion_probes": {
+                        "required_pairs_checked": 67,
+                        "required_pairs_missing": [],
+                        "forbidden_pairs_checked": 10,
+                        "forbidden_pairs_observed": 0,
+                        "forbidden_pairs_found": [],
+                        "all_queries_keyed": True,
+                        "cycle_markers": 0,
+                        "cap_markers": 0,
+                    },
+                    "generation_direction_relation": {
+                        "generation_safe_analyzer_subset_of_full_analyzer": True,
+                        "generation_safe_minus_full_empty": True,
+                        "full_minus_generation_safe_nonempty": True,
+                    },
+                    "directionality_probes": {
+                        "required_pairs_checked": 3,
+                        "required_pairs_missing": [],
+                        "forbidden_pairs_checked": 3,
+                        "forbidden_pairs_observed": 0,
+                        "forbidden_pairs_found": [],
+                        "canonical_short_instrumental_only": True,
+                        "analysis_only_adjective_comparative_excluded": True,
+                        "analysis_only_verb_future_plan_excluded": True,
+                    },
+                    "installed_artifacts": {
+                        "dictionary_generator": dict(equivalent),
+                        "dictionary_analyzer_surface_to_lexical": dict(equivalent),
+                        "full_productive_analyzer": dict(equivalent),
+                        "all_installed_relations_equivalent_to_standard": True,
+                    },
+                    "combined_generation_subset": {
+                        "dictionary_and_productive_generator_subset_of_analyzers": True,
+                        "generated_minus_accepted_empty": True,
+                    },
                 }
             }
         }
@@ -194,9 +304,30 @@ class ResourceManifestTests(unittest.TestCase):
             "files": files,
             "source": {},
             "build": (
-                ResourceManifestTests.finite_guesser_gate()
-                if schema == RESOURCE_MANIFEST_V3
-                else {}
+                {
+                    "inputs": {
+                        "scripts/guesser_regression_probes.json": {
+                            "bytes": 10,
+                            "sha256": "a" * 64,
+                        },
+                        "scripts/generator_regression_probes.json": {
+                            "bytes": 11,
+                            "sha256": "b" * 64,
+                        },
+                    },
+                    "verification": {
+                        **ResourceManifestTests.finite_guesser_gate(
+                            GUESSER_FINITE_SCHEMA_V2
+                        )["verification"],
+                        **ResourceManifestTests.finite_generator_gate(files),
+                    },
+                }
+                if schema == RESOURCE_MANIFEST_V4
+                else (
+                    ResourceManifestTests.finite_guesser_gate()
+                    if schema == RESOURCE_MANIFEST_V3
+                    else {}
+                )
             ),
         }
         encoded = json.dumps(
@@ -308,6 +439,21 @@ class ResourceManifestTests(unittest.TestCase):
         backend.guesser_verified_finite = True
         backend.guesser_productive_safe = True
         backend.guesser_safety_reason = "test"
+        backend.generator_path = resource_dir / "kaz.autogen.hfstol"
+        backend.productive_generator_path = (
+            resource_dir / "kaz.guesser.autogen.hfstol"
+        )
+        backend.productive_generator_verified_finite = (
+            _has_verified_v4_productive_generator_gate(manifest)
+        )
+        backend.productive_generator_safe = (
+            backend.productive_generator_verified_finite
+        )
+        backend.productive_generator_safety_reason = (
+            "verified productive generator"
+            if backend.productive_generator_verified_finite
+            else "functional rollback without productive generation"
+        )
         backend._executable_origins = {"hfst-proc": "resource-bound-toolchain"}
         backend._executable_verified = {"hfst-proc": True}
         backend.hfst_proc = str(command)
@@ -338,10 +484,11 @@ class ResourceManifestTests(unittest.TestCase):
             with self.assertRaisesRegex(BackendError, "schema"):
                 backend._read_manifest()
 
-    def test_v2_standard_and_v3_optimized_resource_layouts_are_both_valid(self) -> None:
+    def test_v2_v3_and_v4_resource_layouts_are_additively_valid(self) -> None:
         for schema, guesser_name in (
             (RESOURCE_MANIFEST_V2, "kaz.guesser.automorf.hfst"),
             (RESOURCE_MANIFEST_V3, "kaz.guesser.automorf.hfstol"),
+            (RESOURCE_MANIFEST_V4, "kaz.guesser.automorf.hfstol"),
         ):
             with self.subTest(schema=schema), tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary)
@@ -351,6 +498,10 @@ class ResourceManifestTests(unittest.TestCase):
                 observed = backend._read_manifest()
                 self.assertEqual(observed, expected)
                 self.assertIn(guesser_name, observed["files"])
+                self.assertEqual(
+                    "kaz.guesser.autogen.hfstol" in observed["files"],
+                    schema == RESOURCE_MANIFEST_V4,
+                )
 
     def test_v2_manifest_cannot_claim_the_v3_optimized_guesser_layout(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -375,6 +526,133 @@ class ResourceManifestTests(unittest.TestCase):
             backend.resource_dir = root
             with self.assertRaisesRegex(BackendError, "file set"):
                 backend._read_manifest()
+
+    def test_v4_manifest_requires_every_productive_generator_gate(self) -> None:
+        mutations = (
+            ("graph", "reachable_input_epsilon_cycle", True),
+            ("inverse_relation", "generator_inverse_equals_productive_analyzer", False),
+            ("optimized_runtime", "candidate_sets_equal_to_standard", False),
+            ("optimized_runtime", "standard_optimized_mismatches", ["query"]),
+            ("inversion_probes", "required_pairs_missing", ["pair"]),
+            ("inversion_probes", "forbidden_pairs_observed", 1),
+            (
+                "generation_direction_relation",
+                "generation_safe_minus_full_empty",
+                False,
+            ),
+            ("directionality_probes", "forbidden_pairs_observed", 1),
+            (
+                "installed_artifacts",
+                "all_installed_relations_equivalent_to_standard",
+                False,
+            ),
+            ("combined_generation_subset", "generated_minus_accepted_empty", False),
+        )
+        for section, field, changed in mutations:
+            with self.subTest(section=section, field=field), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                manifest = self.write_resource_manifest(root, RESOURCE_MANIFEST_V4)
+                result = manifest["build"]["verification"][
+                    "productive_generator_finite_valued"
+                ]["result"]
+                result[section][field] = changed
+                identity = {
+                    key: value
+                    for key, value in manifest.items()
+                    if key not in {"bundle_id", "version"}
+                }
+                manifest["bundle_id"] = hashlib.sha256(
+                    json.dumps(
+                        identity,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode()
+                ).hexdigest()
+                (root / "manifest.json").write_text(
+                    json.dumps(manifest, ensure_ascii=False), encoding="utf-8"
+                )
+                backend = FSTBackend.__new__(FSTBackend)
+                backend.resource_dir = root
+                with self.assertRaisesRegex(
+                    BackendError, "productive-generator verification"
+                ):
+                    backend._read_manifest()
+
+    def test_v4_generator_proof_inputs_are_bound_to_installed_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            manifest = self.write_resource_manifest(root, RESOURCE_MANIFEST_V4)
+            result = manifest["build"]["verification"][
+                "productive_generator_finite_valued"
+            ]["result"]
+            result["inputs"]["productive_generator_optimized"] = {
+                "bytes": 1,
+                "sha256": "f" * 64,
+            }
+            identity = {
+                key: value
+                for key, value in manifest.items()
+                if key not in {"bundle_id", "version"}
+            }
+            manifest["bundle_id"] = hashlib.sha256(
+                json.dumps(
+                    identity,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode()
+            ).hexdigest()
+            (root / "manifest.json").write_text(
+                json.dumps(manifest, ensure_ascii=False), encoding="utf-8"
+            )
+            backend = FSTBackend.__new__(FSTBackend)
+            backend.resource_dir = root
+            with self.assertRaisesRegex(
+                BackendError, "productive-generator verification"
+            ):
+                backend._read_manifest()
+
+    def test_v4_guesser_v2_proof_is_tamper_sensitive(self) -> None:
+        for mutation in ("baseline", "forbidden", "unbounded_epsilon", "generic_loan"):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                manifest = self.write_resource_manifest(root, RESOURCE_MANIFEST_V4)
+                result = manifest["build"]["verification"][
+                    "productive_guesser_finite_valued"
+                ]["result"]
+                if mutation == "baseline":
+                    result["baseline_relation"]["baseline_subset_of_final"] = False
+                elif mutation == "forbidden":
+                    result["no_cap_probes"]["forbidden_readings_observed"] = 1
+                elif mutation == "unbounded_epsilon":
+                    result["no_cap_probes"]["bounded_root_relation"][
+                        "unbounded_input_epsilon_root_templates"
+                    ] = True
+                else:
+                    result["no_cap_probes"]["bounded_root_relation"][
+                        "loan_back_harmony"
+                    ]["generic_back_harmony_g_to_k"] = True
+                identity = {
+                    key: value
+                    for key, value in manifest.items()
+                    if key not in {"bundle_id", "version"}
+                }
+                manifest["bundle_id"] = hashlib.sha256(
+                    json.dumps(
+                        identity,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode()
+                ).hexdigest()
+                (root / "manifest.json").write_text(
+                    json.dumps(manifest, ensure_ascii=False), encoding="utf-8"
+                )
+                backend = FSTBackend.__new__(FSTBackend)
+                backend.resource_dir = root
+                with self.assertRaisesRegex(BackendError, "finite-guesser verification"):
+                    backend._read_manifest()
 
     def test_v3_manifest_rejects_malformed_legacy_finite_guesser_proof(self) -> None:
         for mutation in (

@@ -22,10 +22,20 @@ The checked-in toolchain lock fixes every Debian archive's filename, package,
 version, architecture, byte size, and SHA-256. Bootstrap rejects a changed or
 unexpected archive before extraction, then records every extracted toolchain
 file and required executable. Resource manifests also record source/build-script
-inputs, compiled resources, and the formal generator-subset verification gate.
+inputs, compiled resources, and the formal dictionary/productive generator
+subset, finite-valued, exact-inverse, and installed-relation verification gates.
 They use the locked source commit timestamp rather than wall-clock build time,
 so two byte-identical builds have the same manifest and content address. The
 runtime verifies the resource hashes before loading.
+
+The bf1f resource bundle's exact project-owned producer inputs are preserved in
+`packaging/resource-producer/bf1f31ff6e5860585b9e4134f12dcfb9d6df8030ee87b368e5a5f29eb45c1188/`.
+That snapshot is distinct from later hardened runtime consumer code. Its lock
+also identifies the clean Apertium tree and Ubuntu r5 HFST/CG3 toolchain used by
+the independently reproduced byte-identical build. A corresponding-source
+asset must carry and verify the producer snapshot plus those external source
+closures; replacing it with current consumer files or rewriting bf1f's sealed
+manifest is not equivalent source disclosure.
 
 ## macOS arm64 detached runtime (0.2.3)
 

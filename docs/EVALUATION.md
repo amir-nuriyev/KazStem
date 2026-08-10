@@ -81,9 +81,10 @@ resource bundle and extracted toolchain subset, not a byte-closed host image;
 reports therefore set `byte_closed=false`. Ambient `LD_LIBRARY_PATH`,
 `LD_PRELOAD`, or `LD_AUDIT` also makes a run non-official; raw
 `LD_PRELOAD`/`LD_AUDIT` values are hashed rather than copied into the report.
-Legacy resource v2 remains usable for
-rollback but non-official, while official runs require the sealed v3
-resource/toolchain layout.
+Legacy resource v2 remains usable for rollback but non-official. Sealed v3 is
+the analyzer/guesser rollback; v4 adds the separately proven productive
+generator without weakening the finite analyzer relation. Reports must record
+which schema and exact bundle ID supplied each capability.
 
 Neural validity is independent of the FST backend flag. An official neural run
 must recompute the checked-in model and live-environment manifests, bind the

@@ -31,7 +31,12 @@ CONTROL_SUPERBLANKS = {
 PROTECTED_CHARACTERS = frozenset("\\^$/<>{}[]@#*+~|=&`")
 RESOURCE_MANIFEST_V2 = "qazmorph-resource-manifest-v2"
 RESOURCE_MANIFEST_V3 = "qazmorph-resource-manifest-v3"
+RESOURCE_MANIFEST_V4 = "qazmorph-resource-manifest-v4"
 GUESSER_FINITE_SCHEMA_V1 = "qazmorph-guesser-finiteness-v1"
+GUESSER_FINITE_SCHEMA_V2 = "qazmorph-guesser-finiteness-v2"
+PRODUCTIVE_GENERATOR_FINITE_SCHEMA_V2 = (
+    "qazmorph-productive-generator-finiteness-v2"
+)
 # The v1 gate predates the stronger bundle-independent verifier contract.  Its
 # result is trusted only as part of the exact, content-addressed f03e release
 # whose proof metadata and resource hashes were reviewed together.
@@ -50,10 +55,19 @@ RESOURCE_FILES_BY_SCHEMA = {
     ),
     RESOURCE_MANIFEST_V3: frozenset(
         {
-        "kaz.automorf.hfstol",
-        "kaz.autogen.hfstol",
-        "kaz.guesser.automorf.hfstol",
-        "kaz.rlx.bin",
+            "kaz.automorf.hfstol",
+            "kaz.autogen.hfstol",
+            "kaz.guesser.automorf.hfstol",
+            "kaz.rlx.bin",
+        }
+    ),
+    RESOURCE_MANIFEST_V4: frozenset(
+        {
+            "kaz.automorf.hfstol",
+            "kaz.autogen.hfstol",
+            "kaz.guesser.automorf.hfstol",
+            "kaz.guesser.autogen.hfstol",
+            "kaz.rlx.bin",
         }
     ),
 }
@@ -286,24 +300,77 @@ def _v1_guesser_gate_sections(
 
 
 def _has_verified_v3_guesser_gate(manifest: dict[str, Any]) -> bool:
-    """Accept the reviewed v1 result only after caller-verified bundle identity."""
+    """Accept the pinned v1 exception or the stronger v2 bounded-root gate."""
 
-    sections = _v1_guesser_gate_sections(manifest)
-    if sections is None:
+    try:
+        result = manifest["build"]["verification"][
+            "productive_guesser_finite_valued"
+        ]["result"]
+        graph = result["graph"]
+        probes = result["no_cap_probes"]
+        optimized = result["optimized_runtime"]
+    except (KeyError, TypeError):
         return False
-    _result, graph, probes, optimized = sections
+    if (
+        manifest.get("schema") not in {RESOURCE_MANIFEST_V3, RESOURCE_MANIFEST_V4}
+        or not all(
+            isinstance(section, dict)
+            for section in (result, graph, probes, optimized)
+        )
+    ):
+        return False
 
     def zero(value: object) -> bool:
         return isinstance(value, int) and not isinstance(value, bool) and value == 0
 
-    return (
-        manifest.get("bundle_id") == PINNED_LEGACY_V1_BUNDLE_ID
-        and graph.get("reachable_input_epsilon_cycle") is False
+    common = (
+        graph.get("reachable_input_epsilon_cycle") is False
         and probes.get("all_lemmas_match_bounded_root_relation") is True
         and zero(probes.get("cycle_markers"))
         and optimized.get("full_relation_equivalent_to_standard") is True
         and optimized.get("candidate_sets_equal_to_standard") is True
         and zero(optimized.get("cycle_markers"))
+    )
+    schema = result.get("schema")
+    if schema == GUESSER_FINITE_SCHEMA_V1:
+        return bool(
+            common
+            and manifest.get("schema") == RESOURCE_MANIFEST_V3
+            and manifest.get("bundle_id") == PINNED_LEGACY_V1_BUNDLE_ID
+        )
+    if schema != GUESSER_FINITE_SCHEMA_V2 or not common:
+        return False
+    try:
+        baseline = result["baseline_relation"]
+        bounded_roots = probes["bounded_root_relation"]
+        syncope = bounded_roots["noun_high_vowel_syncope"]
+        loan = bounded_roots["loan_back_harmony"]
+    except (KeyError, TypeError):
+        return False
+    if not all(
+        isinstance(section, dict)
+        for section in (baseline, bounded_roots, syncope, loan)
+    ):
+        return False
+    return (
+        baseline.get("baseline_subset_of_final") is True
+        and zero(probes.get("forbidden_readings_observed"))
+        and isinstance(probes.get("forbidden_readings_checked"), int)
+        and not isinstance(probes.get("forbidden_readings_checked"), bool)
+        and probes["forbidden_readings_checked"] > 0
+        and isinstance(probes.get("probes"), int)
+        and not isinstance(probes.get("probes"), bool)
+        and probes["probes"] >= 362
+        and isinstance(probes.get("deterministic_adversarial_probes"), int)
+        and not isinstance(probes.get("deterministic_adversarial_probes"), bool)
+        and probes["deterministic_adversarial_probes"] >= 256
+        and probes.get("tracked_readings_missing") == []
+        and bounded_roots.get("unbounded_input_epsilon_root_templates") is False
+        and syncope.get("noun_only") is True
+        and syncope.get("requires_nonempty_surface_suffix") is True
+        and loan.get("noun_only") is True
+        and loan.get("lemma_suffix") == "кубок"
+        and loan.get("generic_back_harmony_g_to_k") is False
     )
 
 
@@ -321,16 +388,177 @@ def _v3_guesser_gate_schema(manifest: dict[str, Any]) -> str | None:
 
 
 def _guesser_safety_reason(manifest: dict[str, Any], *, verified: bool) -> str:
-    if manifest.get("schema") != RESOURCE_MANIFEST_V3:
+    resource_schema = manifest.get("schema")
+    if resource_schema not in {RESOURCE_MANIFEST_V3, RESOURCE_MANIFEST_V4}:
         return "legacy resource v2 has no verifiable finite-guesser gate"
-    if verified:
+    gate_schema = _v3_guesser_gate_schema(manifest)
+    if verified and gate_schema == GUESSER_FINITE_SCHEMA_V1:
         return "pinned legacy f03e resource v3 embeds its reviewed finiteness-v1 gate"
-    if _v3_guesser_gate_schema(manifest) == GUESSER_FINITE_SCHEMA_V1:
+    if verified:
+        return (
+            f"resource {str(resource_schema).rsplit('-', 1)[-1]} embeds the required "
+            "finiteness-v2 optimized-guesser gate"
+        )
+    if gate_schema == GUESSER_FINITE_SCHEMA_V1:
         return (
             "resource v3 finiteness-v1 proof is trusted only for pinned legacy "
             f"bundle {PINNED_LEGACY_V1_BUNDLE_ID}; productive guesser disabled"
         )
-    return "resource v3 finite-guesser proof is missing or invalid"
+    return "resource finite-guesser proof is missing or invalid"
+
+
+def _has_verified_v4_productive_generator_gate(
+    manifest: dict[str, Any],
+) -> bool:
+    """Validate the complete finite inverse and installed-artifact proof."""
+
+    if manifest.get("schema") != RESOURCE_MANIFEST_V4:
+        return False
+    try:
+        result = manifest["build"]["verification"][
+            "productive_generator_finite_valued"
+        ]["result"]
+        graph = result["graph"]
+        inverse = result["inverse_relation"]
+        optimized = result["optimized_runtime"]
+        probes = result["inversion_probes"]
+        direction_relation = result["generation_direction_relation"]
+        direction_probes = result["directionality_probes"]
+        installed = result["installed_artifacts"]
+        combined = result["combined_generation_subset"]
+        inputs = result["inputs"]
+        files = manifest["files"]
+        build_inputs = manifest["build"]["inputs"]
+    except (KeyError, TypeError):
+        return False
+    if not all(
+        isinstance(section, dict)
+        for section in (
+            result,
+            graph,
+            inverse,
+            optimized,
+            probes,
+            direction_relation,
+            direction_probes,
+            installed,
+            combined,
+            inputs,
+            files,
+            build_inputs,
+        )
+    ):
+        return False
+
+    def positive(value: object) -> bool:
+        return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+    def zero(value: object) -> bool:
+        return isinstance(value, int) and not isinstance(value, bool) and value == 0
+
+    expected_inputs = {
+        "generation_safe_productive_analyzer_standard",
+        "full_productive_analyzer_standard",
+        "full_productive_analyzer_optimized",
+        "productive_generator_standard",
+        "productive_generator_optimized",
+        "dictionary_generator_standard",
+        "dictionary_generator_optimized",
+        "dictionary_analyzer_lexical_to_surface_standard",
+        "dictionary_analyzer_surface_to_lexical_optimized",
+        "baseline_probes",
+        "direction_probes",
+    }
+    return bool(
+        result.get("schema") == PRODUCTIVE_GENERATOR_FINITE_SCHEMA_V2
+        and graph.get("reachable_input_epsilon_cycle") is False
+        and inverse.get("generator_inverse_equals_productive_analyzer") is True
+        and inverse.get("productive_analyzer_minus_generator_inverse_empty") is True
+        and inverse.get("generator_inverse_minus_productive_analyzer_empty") is True
+        and optimized.get("full_relation_equivalent_to_standard") is True
+        and optimized.get("standard_minus_optimized_roundtrip_empty") is True
+        and optimized.get("optimized_roundtrip_minus_standard_empty") is True
+        and optimized.get("candidate_sets_equal_to_standard") is True
+        and optimized.get("standard_optimized_mismatches") == []
+        and zero(optimized.get("cycle_markers"))
+        and zero(optimized.get("cap_markers"))
+        and positive(optimized.get("queries"))
+        and probes.get("required_pairs_missing") == []
+        and positive(probes.get("required_pairs_checked"))
+        and probes["required_pairs_checked"] >= 64
+        and positive(probes.get("forbidden_pairs_checked"))
+        and zero(probes.get("forbidden_pairs_observed"))
+        and probes.get("forbidden_pairs_found") == []
+        and probes.get("all_queries_keyed") is True
+        and zero(probes.get("cycle_markers"))
+        and zero(probes.get("cap_markers"))
+        and direction_relation.get(
+            "generation_safe_analyzer_subset_of_full_analyzer"
+        )
+        is True
+        and direction_relation.get("generation_safe_minus_full_empty") is True
+        and direction_relation.get("full_minus_generation_safe_nonempty") is True
+        and direction_probes.get("required_pairs_checked") == 3
+        and direction_probes.get("required_pairs_missing") == []
+        and direction_probes.get("forbidden_pairs_checked") == 3
+        and zero(direction_probes.get("forbidden_pairs_observed"))
+        and direction_probes.get("forbidden_pairs_found") == []
+        and direction_probes.get("canonical_short_instrumental_only") is True
+        and direction_probes.get(
+            "analysis_only_adjective_comparative_excluded"
+        )
+        is True
+        and direction_probes.get("analysis_only_verb_future_plan_excluded") is True
+        and installed.get("all_installed_relations_equivalent_to_standard") is True
+        and all(
+            isinstance(installed.get(name), dict)
+            and installed[name].get("full_relation_equivalent_to_standard") is True
+            and installed[name].get(
+                "standard_minus_optimized_roundtrip_empty"
+            )
+            is True
+            and installed[name].get(
+                "optimized_roundtrip_minus_standard_empty"
+            )
+            is True
+            for name in (
+                "dictionary_generator",
+                "dictionary_analyzer_surface_to_lexical",
+                "full_productive_analyzer",
+            )
+        )
+        and set(inputs) == expected_inputs
+        and inputs.get("productive_generator_optimized")
+        == files.get("kaz.guesser.autogen.hfstol")
+        and inputs.get("dictionary_generator_optimized")
+        == files.get("kaz.autogen.hfstol")
+        and inputs.get("dictionary_analyzer_surface_to_lexical_optimized")
+        == files.get("kaz.automorf.hfstol")
+        and inputs.get("full_productive_analyzer_optimized")
+        == files.get("kaz.guesser.automorf.hfstol")
+        and inputs.get("baseline_probes")
+        == build_inputs.get("scripts/guesser_regression_probes.json")
+        and inputs.get("direction_probes")
+        == build_inputs.get("scripts/generator_regression_probes.json")
+        and combined.get(
+            "dictionary_and_productive_generator_subset_of_analyzers"
+        )
+        is True
+        and combined.get("generated_minus_accepted_empty") is True
+    )
+
+
+def _productive_generator_safety_reason(
+    manifest: dict[str, Any], *, verified: bool
+) -> str:
+    if manifest.get("schema") != RESOURCE_MANIFEST_V4:
+        return "resource v2/v3 is a functional rollback without productive generation"
+    if verified:
+        return (
+            "resource v4 embeds the exact-inverse, finite-valued optimized "
+            "productive-generator gate"
+        )
+    return "resource v4 productive-generator proof is missing or invalid"
 
 
 class FSTBackend:
@@ -346,7 +574,10 @@ class FSTBackend:
         self.grammar_path = self.resource_dir / "kaz.rlx.bin"
         self.manifest = self._read_manifest()
         self._resource_inventory = self._verify_resource_inventory()
-        self.guesser_optimized = self.manifest["schema"] == RESOURCE_MANIFEST_V3
+        self.guesser_optimized = self.manifest["schema"] in {
+            RESOURCE_MANIFEST_V3,
+            RESOURCE_MANIFEST_V4,
+        }
         self.guesser_format = "optimized" if self.guesser_optimized else "standard"
         self.guesser_verified_finite = _has_verified_v3_guesser_gate(self.manifest)
         self.guesser_productive_safe = self.guesser_verified_finite
@@ -357,6 +588,20 @@ class FSTBackend:
             "kaz.guesser.automorf.hfstol"
             if self.guesser_optimized
             else "kaz.guesser.automorf.hfst"
+        )
+        self.generator_path = self.resource_dir / "kaz.autogen.hfstol"
+        self.productive_generator_path = (
+            self.resource_dir / "kaz.guesser.autogen.hfstol"
+        )
+        self.productive_generator_verified_finite = (
+            _has_verified_v4_productive_generator_gate(self.manifest)
+        )
+        self.productive_generator_safe = self.productive_generator_verified_finite
+        self.productive_generator_safety_reason = (
+            _productive_generator_safety_reason(
+                self.manifest,
+                verified=self.productive_generator_verified_finite,
+            )
         )
         self._select_runtime_toolchain()
         self.toolchain_manifest = self._read_bound_toolchain_manifest()
@@ -454,6 +699,12 @@ class FSTBackend:
             manifest.get("build"), dict
         ):
             raise BackendError(f"Resource manifest provenance is incomplete: {path}")
+        if schema == RESOURCE_MANIFEST_V4 and not _has_verified_v3_guesser_gate(
+            manifest
+        ):
+            raise BackendError(
+                f"Resource v4 finite-guesser verification is missing or invalid: {path}"
+            )
         if schema == RESOURCE_MANIFEST_V3 and not _has_verified_v3_guesser_gate(manifest):
             # Structurally complete v1 proofs from unknown content-addressed
             # bundles remain usable only for nonproductive rollback.  Missing
@@ -462,6 +713,14 @@ class FSTBackend:
                 raise BackendError(
                     f"Resource v3 finite-guesser verification is missing or malformed: {path}"
                 )
+        if (
+            schema == RESOURCE_MANIFEST_V4
+            and not _has_verified_v4_productive_generator_gate(manifest)
+        ):
+            raise BackendError(
+                "Resource v4 productive-generator verification is missing or "
+                f"invalid: {path}"
+            )
         for name, metadata in files.items():
             resource = self.resource_dir / name
             if not isinstance(metadata, dict) or not resource.is_file():
@@ -1221,6 +1480,7 @@ class FSTBackend:
             )
             and not unverified_overrides
         )
+        resource_schema_label = str(self.manifest["schema"]).rsplit("-", 1)[-1]
         non_official_reasons = [
             f"unverified runtime executable override: {origin}"
             for origin in sorted(unverified_overrides)
@@ -1236,8 +1496,17 @@ class FSTBackend:
         else:
             if not self.guesser_verified_finite:
                 non_official_reasons.append(
-                    "resource v3 has no verified finite-guesser proof: "
+                    f"resource {resource_schema_label} has no verified "
+                    "finite-guesser proof: "
                     + self.guesser_safety_reason
+                )
+            if (
+                self.manifest["schema"] == RESOURCE_MANIFEST_V4
+                and not self.productive_generator_verified_finite
+            ):
+                non_official_reasons.append(
+                    "resource v4 has no verified productive-generator proof: "
+                    + self.productive_generator_safety_reason
                 )
             if verification_error is None and not inventory.get(
                 "integrity_seal_verified",
@@ -1246,22 +1515,27 @@ class FSTBackend:
                 if sys.platform == "win32":
                     non_official_reasons.append(
                         (
-                            "resource v3 bound toolchain integrity seal is not verified"
+                            f"resource {resource_schema_label} bound toolchain "
+                            "integrity seal is not verified"
                             if toolchain_origin == "resource-bound-toolchain"
-                            else "resource v3 active platform runtime integrity seal is not verified"
+                            else f"resource {resource_schema_label} active platform "
+                            "runtime integrity seal is not verified"
                         )
                     )
                 else:
                     non_official_reasons.append(
                         (
-                            "resource v3 bound toolchain is not sealed read-only"
+                            f"resource {resource_schema_label} bound toolchain is not "
+                            "sealed read-only"
                             if toolchain_origin == "resource-bound-toolchain"
-                            else "resource v3 active platform runtime is not sealed read-only"
+                            else f"resource {resource_schema_label} active platform "
+                            "runtime is not sealed read-only"
                         )
                     )
             if not resource_inventory.get("verified"):
                 non_official_reasons.append(
-                    "resource v3 bundle inventory is not completely verified"
+                    f"resource {resource_schema_label} bundle inventory is not "
+                    "completely verified"
                 )
             elif not resource_inventory.get(
                 "integrity_seal_verified",
@@ -1269,9 +1543,11 @@ class FSTBackend:
             ):
                 non_official_reasons.append(
                     (
-                        "resource v3 bundle integrity seal is not verified"
+                        f"resource {resource_schema_label} bundle integrity seal is "
+                        "not verified"
                         if sys.platform == "win32"
-                        else "resource v3 bundle is not sealed read-only"
+                        else f"resource {resource_schema_label} bundle is not sealed "
+                        "read-only"
                     )
                 )
         if sys.platform.startswith("linux"):
@@ -1334,6 +1610,19 @@ class FSTBackend:
             ),
             "platform_lock": getattr(self, "platform_runtime_lock_entry", None),
         }
+        resource_producer_inputs = self.manifest.get("build", {}).get("inputs")
+        resource_producer_source = {
+            "contract": "separate-manifest-bound-resource-producer-snapshot-v1",
+            "bundle_id": self.manifest.get("bundle_id"),
+            "snapshot_required_separately": True,
+            "runtime_consumer_source_substitution_allowed": False,
+            "consumer_source_identity_verified_by_runtime": False,
+            "inputs": (
+                dict(resource_producer_inputs)
+                if isinstance(resource_producer_inputs, dict)
+                else None
+            ),
+        }
         if sys.platform == "darwin":
             dynamic_dependency_closure = (
                 "non-system Mach-O dependencies are included in the active runtime "
@@ -1363,10 +1652,20 @@ class FSTBackend:
                 "productive_safe": self.guesser_productive_safe,
                 "reason": self.guesser_safety_reason,
             },
+            "productive_generator_runtime": {
+                "installed": bool(
+                    self.manifest["schema"] == RESOURCE_MANIFEST_V4
+                    and self.productive_generator_path.is_file()
+                ),
+                "verified_finite": self.productive_generator_verified_finite,
+                "productive_safe": self.productive_generator_safe,
+                "reason": self.productive_generator_safety_reason,
+            },
             "non_official_reasons": non_official_reasons,
             "executables": executables,
             "toolchain_manifest": toolchain,
             "resource_build_toolchain": resource_build_toolchain,
+            "resource_producer_source": resource_producer_source,
             "active_runtime": active_runtime,
             "resource_inventory": resource_inventory,
             "toolchain_inventory": inventory,

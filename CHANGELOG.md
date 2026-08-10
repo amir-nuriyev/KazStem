@@ -30,6 +30,17 @@ Unified native-runtime and Windows portability release.
 - Validates dictionary-generation lemmas, structured tag containers, encoded
   4,096-byte request bounds, positive integer limits, and finite timeouts before
   launching a helper.
+- Loads the sealed bf1 resource-manifest v4 bundle, including its stronger
+  finiteness-v2 guesser proof and finite productive-generator exact inverse,
+  while retaining f03e as the pinned analysis-only rollback.
+- Adds noun-only high-vowel syncope, the literal `*кубок` back-harmony
+  family, forbidden generic-loan probes, and root-diverse bounded ranking.
+- Adds explicit dictionary-first `productive=True` generation with strict wire
+  grammar, one total deadline, hard response bounds, and public-lattice
+  roundtrip validation.
+- Preserves bf1f's exact resource-producer inputs separately from successor
+  runtime consumer source and verifies that corresponding-source snapshot
+  fail-closed.
 - Requires two from-scratch, distinct-root native builds per platform to
   produce byte-identical archives and bundle-relative verification evidence.
 - Documents unsigned/AuthentiCode and SmartScreen status explicitly and keeps
@@ -53,8 +64,9 @@ Unified native-runtime and Windows portability release.
   retain every distinct raw finite-state reading.
 - Prunes the unused generic `hfst-lookup` executable from the ready-run Mac
   runtime while retaining `hfst-proc`, optimized generation, and CG support.
-- Leaves the analyzer lattice, generator, OOV, and CG morphology unchanged;
-  only the documented MyStem-compatible presentation is tightened as above.
+- Leaves dictionary and CG morphology unchanged; MyStem-compatible presentation
+  changes remain limited to the documented envelopes above, while the bounded
+  productive additions are explicitly listed separately.
 - Supersedes the private, unpublished 0.2.2 native-runtime candidates; no
   public 0.2.2 release or artifact is part of the release history.
 

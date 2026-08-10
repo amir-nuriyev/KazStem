@@ -222,6 +222,7 @@ class ToolchainManifestPrimitiveTests(unittest.TestCase):
         self.assertIn("hfst-fst2strings", lock["required_commands"])
         self.assertIn("hfst-fst2txt", lock["required_commands"])
         self.assertIn("hfst-regexp2fst", lock["required_commands"])
+        self.assertIn("hfst-disjunct", lock["required_commands"])
 
 
 class PlatformRuntimeManifestTests(unittest.TestCase):
@@ -1442,8 +1443,16 @@ class PlatformRuntimeManifestTests(unittest.TestCase):
 
 
 class BuildScriptOrderingTests(unittest.TestCase):
-    def test_guesser_gate_sources_are_resource_build_inputs(self) -> None:
-        self.assertEqual(resources.SCHEMA, "qazmorph-resource-manifest-v3")
+    def test_guesser_and_generator_gate_sources_are_resource_build_inputs(self) -> None:
+        self.assertEqual(resources.SCHEMA, "qazmorph-resource-manifest-v4")
+        self.assertEqual(
+            resources.GUESSER_VERIFICATION_SCHEMA,
+            "qazmorph-guesser-finiteness-v2",
+        )
+        self.assertEqual(
+            resources.GENERATOR_VERIFICATION_SCHEMA,
+            "qazmorph-productive-generator-finiteness-v2",
+        )
         self.assertIn("scripts/bootstrap_h100.sh", resources.BUILD_INPUTS)
         self.assertIn(
             "scripts/verify_guesser_fst.py", resources.BUILD_INPUTS
@@ -1451,10 +1460,91 @@ class BuildScriptOrderingTests(unittest.TestCase):
         self.assertIn(
             "scripts/guesser_regression_probes.json", resources.BUILD_INPUTS
         )
+        self.assertIn("scripts/verify_generator_fst.py", resources.BUILD_INPUTS)
+        self.assertIn(
+            "scripts/generator_regression_probes.json", resources.BUILD_INPUTS
+        )
         self.assertIn("scripts/toolchain_assets.lock.json", resources.BUILD_INPUTS)
         self.assertIn("scripts/write_toolchain_manifest.py", resources.BUILD_INPUTS)
+        self.assertIn("src/qazmorph/guesser.py", resources.BUILD_INPUTS)
+        self.assertIn("src/qazmorph/generator.py", resources.BUILD_INPUTS)
         self.assertIn("hfst-fst2txt", resources.BUILD_COMMANDS)
         self.assertIn("hfst-regexp2fst", resources.BUILD_COMMANDS)
+        self.assertIn("hfst-disjunct", resources.BUILD_COMMANDS)
+
+    def test_productive_generator_is_inverted_and_verified_before_install(self) -> None:
+        script = (PROJECT_ROOT / "scripts" / "build_resources.sh").read_text(
+            encoding="utf-8"
+        )
+        safe = script.index("kaz.guesser.generation.filtered.automorf.hfst")
+        invert = script.index(
+            "hfst-invert kaz.guesser.generation.filtered.automorf.hfst"
+        )
+        verify = script.index("scripts/verify_generator_fst.py")
+        install = script.index(
+            'install -m 0644 kaz.guesser.autogen.hfstol'
+        )
+        self.assertLess(safe, invert)
+        self.assertLess(invert, verify)
+        self.assertLess(verify, install)
+
+    def test_generation_safe_syncope_unions_retained_and_recovered_branches(self) -> None:
+        script = (PROJECT_ROOT / "scripts" / "build_resources.sh").read_text(
+            encoding="utf-8"
+        )
+        retained = (
+            '@bin"kaz.guesser.generation.unfiltered.automorf.hfst" & '
+            '[ [ %s ]+ [ 0:ы | 0:і ]'
+        )
+        retained_output = (
+            "-o kaz.guesser.generation.noun-syncope-retained.automorf.hfst"
+        )
+        normalizer = (
+            'kaz.guesser.generation.noun-syncope-normalizer.hfst" .o. '
+            '@bin"kaz.guesser.generation.baseline.automorf.hfst'
+        )
+        full_syncope_intersection = (
+            '@bin"kaz.guesser.noun-syncope.automorf.hfst" & '
+            '@bin"kaz.guesser.generation.noun-syncope-composed.automorf.hfst"'
+        )
+        recovered_output = (
+            "-o kaz.guesser.generation.noun-syncope-recovered.automorf.hfst"
+        )
+        branch_union = (
+            '@bin"kaz.guesser.generation.noun-syncope-retained.automorf.hfst" | '
+            '@bin"kaz.guesser.generation.noun-syncope-recovered.automorf.hfst"'
+        )
+        final_union = (
+            '@bin"kaz.guesser.generation.noun-syncope.automorf.hfst" | '
+            '@bin"kaz.guesser.generation.kubok-family.automorf.hfst"'
+        )
+        for fragment in (
+            "[ [ %s ]+ [ 0:ы | 0:і ] [ %s ] [ %s ]+ ]",
+            retained,
+            retained_output,
+            normalizer,
+            full_syncope_intersection,
+            recovered_output,
+            branch_union,
+            final_union,
+        ):
+            self.assertIn(fragment, script)
+        self.assertLess(script.index(retained), script.index(retained_output))
+        self.assertLess(script.index(retained_output), script.index(normalizer))
+        self.assertLess(script.index(normalizer), script.index(full_syncope_intersection))
+        self.assertLess(script.index(full_syncope_intersection), script.index(recovered_output))
+        self.assertLess(script.index(recovered_output), script.index(branch_union))
+        self.assertLess(script.index(branch_union), script.index(final_union))
+
+    def test_project_build_inputs_are_snapshotted_across_compilation(self) -> None:
+        script = (PROJECT_ROOT / "scripts" / "build_resources.sh").read_text(
+            encoding="utf-8"
+        )
+        initial = script.index("build-inputs.start.json")
+        final = script.index("build-inputs.end.json")
+        manifest = script.index("--expected-build-input-snapshot")
+        self.assertLess(initial, final)
+        self.assertLess(final, manifest)
 
     def test_archives_are_verified_before_any_extraction(self) -> None:
         script = (PROJECT_ROOT / "scripts" / "bootstrap_h100.sh").read_text(
@@ -1493,6 +1583,19 @@ class BuildScriptOrderingTests(unittest.TestCase):
             script.index("hfst-regexp2fst -f openfst-tropical"),
             script.index("scripts/verify_guesser_fst.py"),
         )
+        self.assertLess(
+            script.index("kaz.guesser.baseline.automorf.hfst"),
+            script.index("--baseline-fst kaz.guesser.baseline.automorf.hfst"),
+        )
+
+    def test_resource_build_can_defer_activation_until_reproducibility_passes(self) -> None:
+        script = (PROJECT_ROOT / "scripts" / "build_resources.sh").read_text(
+            encoding="utf-8"
+        )
+        deferred = script.index('if [[ "$activate_resources" == 0 ]]')
+        stable_link = script.index('link_stage="$runtime_dir/.resources-link.$$"')
+        self.assertLess(deferred, stable_link)
+        self.assertIn("Activation deferred", script)
 
     def test_resource_build_pins_immutable_toolchain_before_compilation(self) -> None:
         script = (PROJECT_ROOT / "scripts" / "build_resources.sh").read_text(

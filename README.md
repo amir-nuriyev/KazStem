@@ -44,7 +44,8 @@ of concept.
 - lemma, UPOS, UD features, ordered raw tags, morphemes, provenance, and scores;
 - fast candidate-constrained Constraint Grammar disambiguation that can abstain;
 - optional Stanza-based neural ranking that cannot invent analyses outside the FST;
-- dictionary generation from exact `(lemma, tags)` analyses;
+- dictionary generation plus explicit, proven productive OOV generation from
+  exact `(lemma, tags)` analyses;
 - MyStem-style positional files and `-n/-c/-w/-l/-i/-g/-s/-e/-d` options;
 - text, MyStem-shaped JSON/XML, lossless JSONL v2, and CoNLL-U output;
 - JSONL/TSV fixlists, grammar filtering, Unicode normalization, and bounded OOV caching;
@@ -84,10 +85,17 @@ flowchart LR
   unseen NFC Kazakh-Cyrillic stems of at most 32 code points, excluding
   three-or-more-character elongation/noise runs. The unknown lemma must
   identity-copy a nonempty surface prefix before entering one of the upstream
-  N1, A1, V-TV, or V-IV continuations. The only nonidentity root paths are one
-  explicitly bounded stem-final п→б, к→г, or қ→ғ voicing pair after a nonempty
-  identity prefix. A formal build gate rejects every reachable input-epsilon
-  cycle. Output is capped, ranked, and cached; it never
+  N1, A1, V-TV, or V-IV continuations. Nonidentity paths are limited to one
+  stem-final п→б, к→г, or қ→ғ voicing pair; one noun-only ы/і syncope
+  immediately before the final root consonant; and a noun-only back-harmony
+  rule for the literal `*кубок` compound head. Generic back-harmony г→к
+  guessing is rejected because it would invent roots such as `каталок` from
+  `каталогы` and `блок` from `блогы`. A formal build gate proves the
+  earlier relation remains a subset, rejects every reachable input-epsilon
+  cycle, and exercises required and forbidden readings with result caps
+  disabled. Bounded public ranking interleaves candidates by normalized lemma
+  depth so one productive root cannot monopolize a small limit. Output is
+  capped, ranked, and cached; it never
   adds speculative readings to dictionary words. Non-Kazakh/overlong OOVs
   deterministically receive an explicit unknown analysis. A timed-out, failed,
   or cyclically truncated lookup discards its incomplete output, warns once for
@@ -111,13 +119,15 @@ testable guarantees instead:
 
 1. All enabled tests in the versioned regression suite pass; any intentionally
    skipped contract is named as an unsupported limitation in the results.
-2. Every compiled generator pair is accepted by the analyzer, enforced by the
-   formal build gate `generation - analysis = ∅`. Corpus diagnostics,
-   genuinely held-out evaluations, and performance are reported separately.
+2. Every compiled or productive generator pair is accepted by the union of
+   the compiled and productive analyzers. The build proves the historical
+   `generation - analysis = ∅` gate and exact equality between the productive
+   generator's inverse and the generation-safe bounded analyzer.
 3. The productive analyzer is finite-valued for every finite surface: the
    compiled graph has no reachable input-epsilon cycle, and immutable no-cap
-   probes must complete without HFST's cycle marker while retaining all four
-   configured open-class continuations.
+   probes, including 256 deterministic adversarial forms, must complete without
+   HFST's cycle marker while retaining all four configured open-class
+   continuations and excluding forbidden generic loan alternations.
 
 Unweighted FST readings have `score: null`. KazStem does not invent
 probabilities from lexicon order. OOV and neural scores are normalized only
@@ -156,6 +166,21 @@ finiteness-v1 proof is activated only for the exact content-addressed f03e
 bundle; an unknown but structurally valid v1 bundle loads only as a
 nonproductive, nonofficial dictionary rollback, and a malformed proof is
 rejected.
+
+Manifest v4 is additive: it carries `kaz.guesser.autogen.hfstol`, the proven
+exact inverse of a generation-direction-safe subset that removes upstream
+`Dir/LR` analysis-only variants. Its manifest binds the standard proof inputs,
+all installed optimized relations, immutable direction probes, and the union
+subset check. V2/v3 remain functional rollback formats and never silently
+claim productive generation.
+
+The sealed bf1f v4 bundle records the exact project source bytes that produced
+its resources. Those bytes are preserved separately under
+`packaging/resource-producer/bf1f31ff6e5860585b9e4134f12dcfb9d6df8030ee87b368e5a5f29eb45c1188/`.
+They are not interchangeable with the later hardened runtime consumer source.
+Corresponding-source packaging must verify and carry that immutable producer
+snapshot, its pinned Apertium tree, and the locked toolchain source closure; it
+must not rewrite the sealed resource manifest to match successor runtime code.
 
 Runtime verification re-hashes every compiled resource artifact and every file
 and symlink in the extracted HFST/CG toolchain. Official POSIX runs require both
@@ -293,7 +318,26 @@ with Analyzer(
         print(span.text, span.start, span.end, [r.raw for r in span.analyses])
 
     assert "кітаптарға" in analyzer.generate("кітап", ["n", "pl", "dat"])
+
+    generated = analyzer.generate_detailed(
+        "жаңасөз", ["n", "pl", "dat"], productive=True
+    )
+    assert generated.source == "productive"
+    assert "жаңасөздерге" in generated.forms
 ```
+
+Productive generation is deliberately opt-in, preserving dictionary-only
+`generate()` behavior by default. It validates exact structured tags without
+delimiter or whitespace stripping, queries the dictionary first, and starts
+the productive inverse only after a complete dictionary zero. Roots must be
+NFC lowercase Kazakh Cyrillic, 2–32 characters, contain a vowel, and exclude
+spaces, hyphens, triple repeated code points, final `ь/ъ`, and `ыы/іі`.
+Every result must survive the same public analyzer prefilter and retain the
+exact ordered raw reading after dictionary/fixlist precedence and bounded OOV
+ranking. A single absolute deadline covers worker waiting, process I/O,
+protocol validation/retry, and public-lattice backchecks. Request, record, and
+byte caps, cycles, timeouts, malformed responses, and incomplete backchecks all
+fail closed.
 
 Every token or analysis-span reading retains:
 
@@ -388,11 +432,12 @@ redistribution.
   for `--generate-all`) and has a two-second complete-query bound. Reaching an
   explicit reading/byte cap retains that deterministic prefix; a wall-clock
   timeout or HFST cycle marker never exposes a partial lattice.
-- The productive root relation deliberately does not hallucinate lexical
-  vowel-drop alternations, and it cannot recover a loan whose harmony class is
-  not inferable from its letters. Such analyses remain available when licensed
-  by the compiled dictionary; unsupported OOV alternation probes are tracked
-  explicitly in the resource-build audit.
+- The productive root relation admits one noun-only high-vowel syncope and the
+  literal `*кубок` compound-head back-harmony family. It deliberately
+  rejects a generic loan г→к rule: spelling alone cannot distinguish
+  `кубок→кубогы` from genuine г-final lemmas such as `блог→блогы` or
+  `каталог→каталогы`. Further exceptional harmony classes require explicit
+  lexical evidence.
 
 ## Licensing
 

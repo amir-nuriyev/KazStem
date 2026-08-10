@@ -9,6 +9,7 @@ import tempfile
 import textwrap
 import threading
 import time
+import unicodedata
 import unittest
 from unittest import mock
 import warnings
@@ -21,12 +22,28 @@ from qazmorph.guesser import (
     MAX_LOOKUP_REQUEST_BYTES,
     OpenClassGuesser,
     _GuessOutcome,
+    _depthwise_lemma_interleave,
+    _lemma_key,
     _LookupResponse,
     _PersistentLookupWorker,
     productive_root_kind,
 )
 from qazmorph.stream import parse_analysis
 from qazmorph.types import Analysis
+
+
+def _ranked_analysis(lemma: str, rank: int) -> Analysis:
+    return Analysis(
+        lemma=lemma,
+        upos="NOUN",
+        features=(),
+        tags=("n", "nom"),
+        morphemes=(),
+        raw=f"{lemma}<n><nom>#rank={rank}",
+        source="guesser",
+        score=float(100 - rank),
+        guessed=True,
+    )
 
 
 class ProductiveRootRelationTests(unittest.TestCase):
@@ -43,6 +60,49 @@ class ProductiveRootRelationTests(unittest.TestCase):
                     "stem_final_alternation",
                 )
 
+    def test_noun_syncope_is_one_shot_tag_gated_and_suffixed(self) -> None:
+        for surface, lemma in (
+            ("аузы", "ауыз"),
+            ("орны", "орын"),
+            ("халқы", "халық"),
+            ("еркін", "ерік"),
+        ):
+            with self.subTest(surface=surface, lemma=lemma):
+                self.assertEqual(
+                    productive_root_kind(surface, lemma, ("n", "px3sp")),
+                    "noun_high_vowel_syncope",
+                )
+                self.assertIsNone(productive_root_kind(surface, lemma))
+                self.assertIsNone(
+                    productive_root_kind(surface, lemma, ("adj", "subst"))
+                )
+        for surface, lemma in (("ауз", "ауыз"), ("орн", "орын")):
+            self.assertIsNone(productive_root_kind(surface, lemma, ("n", "nom")))
+
+    def test_back_harmony_g_to_k_is_literal_kubok_family_only(self) -> None:
+        for surface, lemma in (
+            ("кубогы", "кубок"),
+            ("суперкубогы", "суперкубок"),
+            ("кубогының", "кубок"),
+        ):
+            with self.subTest(surface=surface, lemma=lemma):
+                self.assertEqual(
+                    productive_root_kind(surface, lemma, ("n", "px3sp")),
+                    "loan_back_harmony_kubok",
+                )
+        for surface, false_lemma in (
+            ("каталогы", "каталок"),
+            ("аналогы", "аналок"),
+            ("блогы", "блок"),
+            ("психологы", "психолок"),
+        ):
+            with self.subTest(surface=surface, lemma=false_lemma):
+                self.assertIsNone(
+                    productive_root_kind(
+                        surface, false_lemma, ("n", "px3sp")
+                    )
+                )
+
     def test_unlicensed_or_unsuffixed_root_changes_are_rejected(self) -> None:
         for surface, lemma in (
             ("аузы", "ауыз"),
@@ -53,6 +113,61 @@ class ProductiveRootRelationTests(unittest.TestCase):
         ):
             with self.subTest(surface=surface, lemma=lemma):
                 self.assertIsNone(productive_root_kind(surface, lemma))
+
+
+class RootDiverseRankingTests(unittest.TestCase):
+    def test_candidates_are_emitted_one_per_root_then_depthwise(self) -> None:
+        ranked = [
+            _ranked_analysis("алма", 1),
+            _ranked_analysis("алма", 2),
+            _ranked_analysis("ал", 3),
+            _ranked_analysis("алма", 4),
+            _ranked_analysis("алмасөз", 5),
+            _ranked_analysis("ал", 6),
+        ]
+        reordered = _depthwise_lemma_interleave(ranked, len(ranked))
+        self.assertEqual(
+            [analysis.raw.rsplit("=", 1)[-1] for analysis in reordered],
+            ["1", "3", "5", "2", "6", "4"],
+        )
+
+    def test_root_groups_use_nfc_then_casefold(self) -> None:
+        precomposed_upper = _ranked_analysis("Й", 1)
+        decomposed_lower = _ranked_analysis("и\N{COMBINING BREVE}", 2)
+        other = _ranked_analysis("сөз", 3)
+        self.assertEqual(_lemma_key(precomposed_upper), _lemma_key(decomposed_lower))
+        self.assertEqual(
+            _lemma_key(precomposed_upper), unicodedata.normalize("NFC", "й")
+        )
+        self.assertEqual(
+            _depthwise_lemma_interleave(
+                [precomposed_upper, decomposed_lower, other], 3
+            ),
+            [precomposed_upper, other, decomposed_lower],
+        )
+
+    def test_every_old_top_k_root_is_retained_in_new_top_k(self) -> None:
+        ranked = [
+            _ranked_analysis(lemma, rank)
+            for rank, lemma in enumerate(
+                ("алма", "алма", "ал", "алма", "алмасөз", "ал", "а", "алма"),
+                start=1,
+            )
+        ]
+        for limit in range(1, len(ranked) + 1):
+            with self.subTest(limit=limit):
+                old_roots = {_lemma_key(item) for item in ranked[:limit]}
+                new_roots = {
+                    _lemma_key(item)
+                    for item in _depthwise_lemma_interleave(ranked, limit)
+                }
+                self.assertLessEqual(old_roots, new_roots)
+
+    def test_empty_and_overlarge_caps_preserve_bounded_semantics(self) -> None:
+        ranked = [_ranked_analysis("алма", 1), _ranked_analysis("ал", 2)]
+        self.assertEqual(_depthwise_lemma_interleave([], 8), [])
+        self.assertEqual(_depthwise_lemma_interleave(ranked, 0), [])
+        self.assertEqual(_depthwise_lemma_interleave(ranked, 8), ranked)
 
 @unittest.skipUnless(
     os.environ.get("QAZMORPH_PROTOCOL_RESOURCE_DIRS"),
@@ -1206,6 +1321,27 @@ class PersistentGuesserTests(unittest.TestCase):
         self.assertEqual(len(ranked), 2)
         self.assertAlmostEqual(sum(item.score or 0.0 for item in ranked), 1.0)
         self.assertGreaterEqual(ranked[0].score or 0.0, ranked[1].score or 0.0)
+
+    def test_bounded_guess_applies_root_diversity_after_scoring(self) -> None:
+        with mock.patch(
+            "qazmorph.guesser._depthwise_lemma_interleave",
+            wraps=_depthwise_lemma_interleave,
+        ) as interleave:
+            ranked = self.guesser.guess("алмасөз", limit=2)
+        self.assertEqual(len(ranked), 2)
+        self.assertAlmostEqual(sum(item.score or 0.0 for item in ranked), 1.0)
+        interleave.assert_called_once()
+        self.assertEqual(interleave.call_args.args[1], 2)
+
+    def test_generate_all_bypasses_root_diversity_and_public_limit(self) -> None:
+        with mock.patch(
+            "qazmorph.guesser._depthwise_lemma_interleave",
+            side_effect=AssertionError("generate_all must preserve current ordering"),
+        ) as interleave:
+            ranked = self.guesser.guess("алмасөз", limit=1, generate_all=True)
+        self.assertEqual(len(ranked), 4)
+        self.assertAlmostEqual(sum(item.score or 0.0 for item in ranked), 1.0)
+        interleave.assert_not_called()
 
     def test_nonpositive_limits_are_rejected_by_python_apis(self) -> None:
         with self.assertRaisesRegex(ValueError, "limit must be positive"):
