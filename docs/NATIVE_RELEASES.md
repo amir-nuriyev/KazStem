@@ -80,16 +80,18 @@ build-venv/bin/python -m pip install \
   pyinstaller==6.22.0 pyinstaller-hooks-contrib==2026.6 \
   dist/kazstem-0.2.2-py3-none-any.whl
 SOURCE_DATE_EPOCH=1786361661 build-venv/bin/pyinstaller \
-  --clean --noconfirm --onedir --noupx --target-arch arm64 \
-  --name kazstem --collect-data qazmorph build-venv/bin/kazstem
+  --clean --noconfirm \
+  --distpath pyinstaller-dist --workpath pyinstaller-work \
+  packaging/macos/kazstem-minimal.spec
 ```
 
-The exact build-tool wheels and their hashes belong in the binary asset's
-verification report; they are not runtime inputs. After PyInstaller completes,
-copy only the verified f03e directory and content-addressed platform runtime
-under `.qazmorph`, add notices/corresponding source, remove extended attributes,
-normalize archive ownership and timestamps, and test a fresh extraction outside
-the checkout.
+Set `KAZSTEM_ENTRYPOINT` to the absolute `build-venv/bin/kazstem` path for that
+command. The checked-in spec records the complete exclusion set and removes
+PyInstaller's source-introspection runtime hook, which the CLI does not use.
+The exact build-tool wheels and their hashes belong in the paired corresponding-
+source asset; they are not runtime inputs. The remaining assembly, safe strip,
+ad-hoc signing, source binding, and verification procedure is recorded in
+`packaging/macos/README.md`.
 
 ## Other platforms
 

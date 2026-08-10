@@ -182,6 +182,32 @@ class ToolchainManifestPrimitiveTests(unittest.TestCase):
 
 
 class PlatformRuntimeManifestTests(unittest.TestCase):
+    def test_macos_frozen_recipe_excludes_unused_generic_stacks(self) -> None:
+        spec = (PROJECT_ROOT / "packaging/macos/kazstem-minimal.spec").read_text(
+            encoding="utf-8"
+        )
+        for module in (
+            "ssl",
+            "_ssl",
+            "socket",
+            "urllib",
+            "email",
+            "asyncio",
+            "multiprocessing",
+            "sqlite3",
+            "tkinter",
+            "xml",
+            "_hashlib",
+            "unittest",
+            "distutils",
+            "setuptools",
+            "pip",
+        ):
+            with self.subTest(module=module):
+                self.assertIn(json.dumps(module), spec)
+        self.assertIn('entry[0] != "pyi_rth_inspect"', spec)
+        self.assertNotIn(json.dumps("_sha2"), spec)
+
     def test_checked_in_source_lock_has_exact_mac_archives_and_commands(self) -> None:
         lock = platform_runtime.load_source_lock(
             PROJECT_ROOT / "scripts" / "platform_runtime_sources.lock.json"
