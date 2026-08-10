@@ -1,0 +1,119 @@
+{
+  "file_count": 22,
+  "files": {
+    ".nojekyll": {
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "analysis.js": {
+      "bytes": 9235,
+      "sha256": "3ceb3fcfad2d6b0e0f00b87cae31f97a6d64481b0180856c1cc6599caf6b656f"
+    },
+    "app.js": {
+      "bytes": 8493,
+      "sha256": "c02a4c8219401e04c18ea014cea0b95efaae8dd859944f77014c18f0318f1403"
+    },
+    "casefold.js": {
+      "bytes": 29064,
+      "sha256": "ed0f253bce314c1c0f24429de3fc3ec4dabd411ac986ed5c36ca7a3323fc2681"
+    },
+    "csr.js": {
+      "bytes": 10449,
+      "sha256": "61c8614fedaa4c9639f7b66c379d75b2247403586b3a69c278257c450bfbc343"
+    },
+    "formats.js": {
+      "bytes": 5723,
+      "sha256": "51e4062c117d40e1384cd08e6ceb346f715ef816b0a47c420bf194a12bc9d9a7"
+    },
+    "icons/icon.svg": {
+      "bytes": 308,
+      "sha256": "2bc529faa26e605b34a885a00793780cd49053d35cd26ef140ec3505ffbdf259"
+    },
+    "index.html": {
+      "bytes": 5397,
+      "sha256": "d046cffbb9c1dd549b5673239f469175baeb27adc4f8da951eee6771ce2e4a81"
+    },
+    "legal/LICENSE": {
+      "bytes": 35147,
+      "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
+    },
+    "legal/SOURCE-ARCHIVE.json": {
+      "bytes": 215,
+      "sha256": "b17bebcb362913832dc5b57d3be3e3d291e6bbbec9c87004a70ce4d24fb488e1"
+    },
+    "legal/SOURCE.md": {
+      "bytes": 2756,
+      "sha256": "359752644e63359a6d89a4bed39b0bf9181b0eb11b6f93b303399f2de90b327c"
+    },
+    "legal/THIRD_PARTY.md": {
+      "bytes": 6281,
+      "sha256": "b00ced3453e7c5c0875577dd94923391fb030f4ac33b723a55556e01f5bf1638"
+    },
+    "legal/kazstem-browser-corresponding-source-0.2.1.tar.gz": {
+      "bytes": 9499007,
+      "sha256": "9d054a121d50f187bcc14f93b84cf6dd2e9dea3a49046fa75c422bd069d7bafb"
+    },
+    "manifest.webmanifest": {
+      "bytes": 406,
+      "sha256": "b0046650f09b0e52a8e64b20ea65a946c8cdd2303734e02d0274bd4135ca2dad"
+    },
+    "proofs/full-native-ledger.json.gz": {
+      "bytes": 508507,
+      "sha256": "74d3645941c0b4759a8bacf952c41de233713127a4302cf2904ac3fa7c65ada5"
+    },
+    "proofs/full-runtime-probe.json.gz": {
+      "bytes": 497465,
+      "sha256": "c47523c26f7e34f70734a18a2608b0d7ca638b0c755dfc715bb528c1d6712b14"
+    },
+    "resources/analyzer.kzc": {
+      "bytes": 950181,
+      "sha256": "d0df783b4a51eef7db513662ca2fb4ae2d78f7c78ca7b4b797e84e72ccc3c4c0"
+    },
+    "resources/probe-ledger-summary.json": {
+      "bytes": 3437,
+      "sha256": "6d4b8d2f8216a99fcd8e048e9b21aae6d94e88880acf0f3201d34876e4aeaf22"
+    },
+    "resources/resource-manifest.json": {
+      "bytes": 905,
+      "sha256": "8b21c912a54dd1aeb5a9734054b8c8857b9dba19aa37dd58c0ea90746689ccd5"
+    },
+    "styles.css": {
+      "bytes": 5030,
+      "sha256": "faec9d51b9a7bba55aef4c078cad059c9e42a8a99dce876b85f811934130497e"
+    },
+    "sw.js": {
+      "bytes": 1442,
+      "sha256": "5c2d4a0f3b8b2df06253dcbe24592d57bdbd6fc8b583896a92b6cdac45f282e0"
+    },
+    "worker.js": {
+      "bytes": 14405,
+      "sha256": "2a57b744d7d427403d9c3f75095308847132a9867947fa52941c60e8ee34bd80"
+    }
+  },
+  "precache_asset_count": 18,
+  "precache_assets": [
+    "./",
+    "./index.html",
+    "./styles.css",
+    "./app.js",
+    "./worker.js",
+    "./csr.js",
+    "./analysis.js",
+    "./casefold.js",
+    "./formats.js",
+    "./manifest.webmanifest",
+    "./icons/icon.svg",
+    "./resources/resource-manifest.json",
+    "./resources/probe-ledger-summary.json",
+    "./resources/analyzer.kzc",
+    "./legal/LICENSE",
+    "./legal/THIRD_PARTY.md",
+    "./legal/SOURCE.md",
+    "./legal/SOURCE-ARCHIVE.json"
+  ],
+  "precache_identity": "kazstem-browser-d0df783b4a51-v4",
+  "probe_ledger_summary_precached": true,
+  "result": "pass",
+  "schema": "kazstem.browser-pages-stage.v1",
+  "total_bytes": 11593853
+}
