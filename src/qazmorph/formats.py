@@ -248,17 +248,17 @@ def _mystem_analysis_json(
     for group in groups:
         first = group[0]
         row: dict[str, object] = {"lex": first.lemma}
-        if gram_info:
-            grammars = list(dict.fromkeys(_grammar(analysis) for analysis in group))
-            row["gr"] = grammars[0] if len(grammars) == 1 else "(" + "|".join(grammars) + ")"
+        available_scores = [analysis.score for analysis in group if analysis.score is not None]
+        if weights and len(available_scores) == len(group):
+            row["wt"] = round(sum(available_scores), 8)
         if all(analysis.guessed for analysis in group):
             # ``bastard`` is MyStem's documented qualifier for a generated
             # (non-dictionary) hypothesis. The richer JSONL schema retains
             # QazMorph's clearer boolean/provenance fields.
             row["qual"] = "bastard"
-        available_scores = [analysis.score for analysis in group if analysis.score is not None]
-        if weights and len(available_scores) == len(group):
-            row["wt"] = round(sum(available_scores), 8)
+        if gram_info:
+            grammars = list(dict.fromkeys(_grammar(analysis) for analysis in group))
+            row["gr"] = grammars[0] if len(grammars) == 1 else "(" + "|".join(grammars) + ")"
         rows.append(row)
     return rows
 
@@ -296,14 +296,21 @@ def format_mystem_json(
             continue
         if dictionary_only and token.kind in {"word", "number"} and not analyses:
             continue
-        row: dict[str, object] = {"text": token.text}
         if analyses:
-            row["analysis"] = _mystem_analysis_json(
-                analyses,
-                gram_info=gram_info,
-                merge=merge,
-                weights=weights,
-            )
+            # Match MyStem's stable serialized field order. JSON consumers
+            # must not depend on object order, but keeping ``analysis`` before
+            # ``text`` makes byte-oriented compatibility fixtures useful.
+            row: dict[str, object] = {
+                "analysis": _mystem_analysis_json(
+                    analyses,
+                    gram_info=gram_info,
+                    merge=merge,
+                    weights=weights,
+                ),
+                "text": token.text,
+            }
+        else:
+            row = {"text": token.text}
         rows.append(row)
     if newline:
         return "\n".join(
@@ -440,7 +447,6 @@ def format_xml(
         if dictionary_only and not analyses:
             continue
         chunks.append("<w>")
-        chunks.append(_xml_text(token.text, field="token text"))
         for row in _mystem_analysis_json(
             analyses,
             gram_info=gram_info,
@@ -457,6 +463,10 @@ def format_xml(
             if "wt" in row:
                 attrs.append(f"wt={_xml_attribute(row['wt'], field='analysis wt')}")
             chunks.append("<ana " + " ".join(attrs) + " />")
+        # MyStem emits all zero-width analysis elements before the surface
+        # text in ``w``. This ordering is observable in XML's mixed-content
+        # model, so it is part of the compatibility shape.
+        chunks.append(_xml_text(token.text, field="token text"))
         chunks.append("</w>")
         if sentence_markers and token.sentence_end and index < last_emitted_lexical:
             chunks.append("</se><se>")

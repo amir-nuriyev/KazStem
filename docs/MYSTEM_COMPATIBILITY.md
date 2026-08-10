@@ -3,10 +3,28 @@
 This is a clean-room compatibility layer based on Yandex's public
 [MyStem command-line documentation](https://yandex.ru/dev/mystem/doc/ru/)
 and its published
-[examples](https://yandex.ru/dev/mystem/doc/ru/usage-examples). The MyStem
-binary is not used or inspected. Compatibility here means that familiar
-invocation and output shapes are available for Kazakh; it does **not** mean
-byte-for-byte Russian MyStem emulation.
+[examples](https://yandex.ru/dev/mystem/doc/ru/usage-examples), supplemented by
+black-box envelope probes of the official binary. Compatibility here means
+that familiar invocation and output shapes are available for Kazakh; it does
+**not** mean byte-for-byte Russian MyStem emulation.
+
+## Empirical MyStem 3.1 envelope check
+
+The serializer contract is checked against Yandex's official Linux 3.1 binary,
+not inferred only from examples. The audited versioned archive is
+`mystem-3.1-linux-64bit.tar.gz`, SHA-256
+`4696f4ea8ce3ecda24ef5e8dfe7e4b16cfa5f1844edfcca31c34d636b73c0a62`;
+the executable reports `Version 3.1`. Fixed probes confirm that lexical JSON
+objects place `analysis` before `text`, analysis fields use `lex`, optional
+`wt`, optional `qual`, then optional `gr`, and XML places every `<ana />`
+before the surface text inside `<w>`. KazStem follows those deterministic
+envelope orders.
+
+The audit does not turn the two programs into byte-identical engines. Native
+MyStem may synthesize a final input-line newline, uses Russian grammemes and
+its own probability model, and has implementation-specific whitespace and
+chunking. KazStem preserves the caller's exact input instead of inventing a
+newline and uses Kazakh UD projections and only genuine available scores.
 
 ## Option matrix
 
@@ -27,8 +45,8 @@ byte-for-byte Russian MyStem emulation.
 | `--filter-gram TAG[,TAG]` | Supported with explicit semantics | Every requested value must occur in a reading's raw tags, UPOS, or exact `Feature=Value`. Repeating the option adds conjunctive requirements. |
 | `--fixlist PATH` | Same purpose, different file grammar | Overrides atomic-token dictionary readings, but accepts validated JSONL or three-column TSV. On a whitespace phrase span the fixlist is append-only so it cannot erase the raw FST lattice. MyStem's Russian bracketed paradigm syntax is not parsed. |
 | `--format text` | MyStem-shaped | Emits `surface{lemma...}` text and preserves physical input line endings even without `-c`. Kazakh grammar labels and score availability differ as described here. |
-| `--format json` | MyStem-shaped | Emits one compact JSON array per invocation, or one object per line with `-n`. Records contain `text`; lexical records add `analysis` items using only public MyStem field names `lex`, optional `gr`, `qual="bastard"`, and optional `wt`. |
-| `--format xml` | MyStem-shaped | Emits the documented `<?xml?><html><body><se><w>surface<ana .../></w></se></body></html>` hierarchy and `lex`, optional `qual`, `gr`, and `wt` attributes. Every emitted text and attribute value is checked against the XML 1.0 character repertoire; unrepresentable values (including NUL, forbidden C0 controls, surrogates, U+FFFE, and U+FFFF) produce a controlled status-2 error. Text/JSON/JSONL remain the lossless transport for those code points. |
+| `--format json` | MyStem-shaped | Emits one compact JSON array per invocation, or one object per line with `-n`. Lexical records serialize `analysis` before `text`; analysis items use `lex`, optional `wt`, optional `qual="bastard"`, then optional `gr`. |
+| `--format xml` | MyStem-shaped | Emits the audited `<?xml?><html><body><se><w><ana .../>surface</w></se></body></html>` hierarchy and `lex`, optional `qual`, `gr`, and `wt` attributes. Every emitted text and attribute value is checked against the XML 1.0 character repertoire; unrepresentable values (including NUL, forbidden C0 controls, surrogates, U+FFFE, and U+FFFF) produce a controlled status-2 error. Text/JSON/JSONL remain the lossless transport for those code points. |
 | `--generate-all` | Safety-bounded | Expands the productive OOV lattice up to 256 hypotheses. MyStem's potentially unbounded behavior is intentionally not claimed. |
 | `--weight` | Field-compatible, different score contract | Places text weight after the lemma and before `=grammar`; JSON/XML use `wt`. A field is emitted only when a scoring layer supplied a value. Unweighted FST/CG readings remain null rather than receiving invented probabilities. |
 
@@ -56,9 +74,11 @@ field for this provenance.
 - MyStem's bracketed fixlist paradigm syntax is not accepted.
 - `-d` does not reproduce MyStem's proprietary Russian disambiguator.
 - MyStem's context-independent lemma-frequency model is not reproduced.
-- Exact JSON chunking per physical input line and byte-for-byte whitespace or
-  attribute order are not compatibility guarantees. The JSON value and XML
-  document emitted by QazMorph are independently parseable.
-- No undocumented binary behavior is claimed. When the public documentation
-  does not specify a representation, QazMorph either exposes a documented
-  extension or rejects the combination instead of guessing.
+- Exact JSON chunking per physical input line and byte-for-byte whitespace
+  outside the audited field/element order are not compatibility guarantees.
+  The JSON value and XML document emitted by KazStem are independently
+  parseable.
+- No undocumented binary behavior beyond the recorded envelope probes is
+  claimed. When neither public documentation nor the audit specifies a
+  representation, KazStem exposes a documented extension or rejects the
+  combination instead of guessing.

@@ -447,11 +447,25 @@ class MyStemJsonFormatterTests(unittest.TestCase):
             [
                 {
                     "lex": "foo",
-                    "gr": "(NOUN|VERB)",
-                    "qual": "bastard",
                     "wt": 1.0,
+                    "qual": "bastard",
+                    "gr": "(NOUN|VERB)",
                 }
             ],
+        )
+
+    def test_compatibility_json_uses_mystem_serialized_field_order(self) -> None:
+        analysis = make_analysis("foo", "NOUN", guessed=True, score=0.4)
+        document = Document(
+            "foo", [Token("foo", 0, 3, "word", [analysis])], "lattice", "test"
+        )
+        self.assertEqual(
+            format_mystem_json(
+                document,
+                gram_info=True,
+                weights=True,
+            ),
+            '[{"analysis":[{"lex":"foo","wt":0.4,"qual":"bastard","gr":"NOUN"}],"text":"foo"}]\n',
         )
 
     def test_newline_mode_emits_one_mystem_object_per_line(self) -> None:
@@ -500,13 +514,33 @@ class XmlFormatterTests(unittest.TestCase):
         )
         output = format_xml(document)
         self.assertTrue(output.startswith('<?xml version="1.0" encoding="UTF-8"?>'))
-        self.assertIn("&lt;<w>&amp;", output)
+        self.assertIn("&lt;<w>", output)
         self.assertIn('lex=\'a&amp;"b\'', output)
         self.assertIn('gr="NOUN"', output)
+        self.assertIn(
+            '<w><ana lex=\'a&amp;"b\' gr="NOUN" />&amp;</w>',
+            output,
+        )
         self.assertNotIn("wt=", output)
         self.assertNotIn("</se><se>", output)
         self.assertTrue(output.endswith("</se></body></html>\n"))
         ElementTree.fromstring(output.encode("utf-8"))
+
+    def test_xml_emits_analyses_before_surface_like_mystem(self) -> None:
+        analyses = [
+            make_analysis("кітап", "NOUN"),
+            make_analysis("кітапта", "VERB", guessed=True),
+        ]
+        document = Document(
+            "кітап", [Token("кітап", 0, 5, "word", analyses)], "lattice", "test"
+        )
+        output = format_xml(document)
+        word = ElementTree.fromstring(output.encode("utf-8")).find("./body/se/w")
+        self.assertIsNotNone(word)
+        assert word is not None
+        self.assertIsNone(word.text)
+        self.assertEqual([child.tag for child in word], ["ana", "ana"])
+        self.assertEqual(word[-1].tail, "кітап")
 
     def test_xml_exposes_guessed_qualifier(self) -> None:
         guessed = make_analysis("foo", "NOUN", guessed=True)
