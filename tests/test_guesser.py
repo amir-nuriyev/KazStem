@@ -26,6 +26,7 @@ from qazmorph.guesser import (
     productive_root_kind,
 )
 from qazmorph.stream import parse_analysis
+from qazmorph.types import Analysis
 
 
 class ProductiveRootRelationTests(unittest.TestCase):
@@ -52,35 +53,6 @@ class ProductiveRootRelationTests(unittest.TestCase):
         ):
             with self.subTest(surface=surface, lemma=lemma):
                 self.assertIsNone(productive_root_kind(surface, lemma))
-
-    def test_fast_protocol_shape_gate_matches_public_parser_acceptance(self) -> None:
-        candidates = (
-            "сөз<n><nom>",
-            r"C\+\+<n><nom>",
-            "сөз<n>+е<cop><aor><p3><sg>",
-            "сөз<unknown_tag>",
-            "сөз",
-            "",
-            "*сөз",
-            "сөз+?",
-            "сөз<>",
-            "сөз<n><>",
-        )
-        for candidate in candidates:
-            with self.subTest(candidate=candidate):
-                parsed = parse_analysis(
-                    candidate,
-                    source="guesser",
-                    guessed=True,
-                )
-                expected = bool(parsed is not None and parsed.tags)
-                self.assertEqual(
-                    _PersistentLookupWorker._candidate_analysis_shape_valid(
-                        candidate
-                    ),
-                    expected,
-                )
-
 
 @unittest.skipUnless(
     os.environ.get("QAZMORPH_PROTOCOL_RESOURCE_DIRS"),
@@ -973,17 +945,17 @@ class PersistentGuesserTests(unittest.TestCase):
 
     def test_response_validation_cannot_extend_absolute_deadline(self) -> None:
         self.assertTrue(self.guesser._raw_lookup("жылысөз", timeout=1.0))
-        validate = self.guesser._response_protocol_problem
+        validate = self.guesser._validate_response
 
         def slow_validation(
             surface: str, lines: tuple[str, ...]
-        ) -> str | None:
+        ) -> tuple[str | None, tuple[Analysis | None, ...]]:
             time.sleep(0.1)
             return validate(surface, lines)
 
         with mock.patch.object(
             self.guesser,
-            "_response_protocol_problem",
+            "_validate_response",
             side_effect=slow_validation,
         ), self.assertWarnsRegex(RuntimeWarning, "during response validation"):
             outcome = self.guesser._guess_detailed(
@@ -996,6 +968,30 @@ class PersistentGuesserTests(unittest.TestCase):
         recovered = self.guesser._guess_detailed("жаңасөз", timeout=1.0)
         self.assertTrue(recovered.complete)
         self.assertTrue(recovered.candidates)
+
+    def test_validated_response_reuses_each_exact_parsed_analysis(self) -> None:
+        surface = "алмасөз"
+        with mock.patch(
+            "qazmorph.guesser.parse_analysis", wraps=parse_analysis
+        ) as parse:
+            response = self.guesser._raw_lookup_detailed(surface, timeout=1.0)
+        self.assertIsNotNone(response.validated_analyses)
+        assert response.validated_analyses is not None
+        self.assertEqual(len(response.validated_analyses), len(response.lines))
+        self.assertTrue(all(response.validated_analyses))
+        self.assertEqual(parse.call_count, len(response.lines))
+
+        with mock.patch.object(
+            self.guesser,
+            "_raw_lookup_detailed",
+            return_value=response,
+        ), mock.patch(
+            "qazmorph.guesser.parse_analysis",
+            side_effect=AssertionError("candidate was parsed twice"),
+        ):
+            outcome = self.guesser._guess_detailed(surface)
+        self.assertTrue(outcome.complete)
+        self.assertTrue(outcome.candidates)
 
     def test_request_byte_caps_are_caller_specific(self) -> None:
         oversized_guess = "а" * (MAX_GUESS_REQUEST_BYTES // 2 + 1)

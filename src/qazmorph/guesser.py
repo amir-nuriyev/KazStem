@@ -7,7 +7,6 @@ from dataclasses import dataclass, replace
 import math
 import os
 from pathlib import Path
-import re
 import selectors
 import subprocess
 import sys
@@ -30,7 +29,6 @@ MAX_GUESS_REQUEST_BYTES = MAX_GUESS_SURFACE_LENGTH * 4
 MAX_LOOKUP_REQUEST_BYTES = 4096
 GUESS_CACHE_CAPACITY = 8192
 CYCLE_MARKER = "[...cyclic...]"
-FAST_ANALYSIS_TAG_RE = re.compile(r"<[^<>+]+>")
 WINDOWS_STDERR_BYTE_CAP = 65_536
 WINDOWS_PIPE_READ_CHUNK = 65_536
 STEM_FINAL_ALTERNATIONS = frozenset(
@@ -77,11 +75,12 @@ class _LookupProtocolFailure(_LookupFailure):
 
 @dataclass(frozen=True, slots=True)
 class _LookupResponse:
-    """A bounded response plus whether its terminating record was observed."""
+    """A bounded response with an optional strict parsed-analysis envelope."""
 
     lines: tuple[str, ...]
     complete: bool
     reason: str | None = None
+    validated_analyses: tuple[Analysis | None, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -324,48 +323,6 @@ class _PersistentLookupWorker:
                 f"{context} contains a Unicode control or separator"
             )
         return decoded
-
-    @staticmethod
-    def _candidate_analysis_shape_valid(candidate: str) -> bool:
-        """Match the parser's cheap acceptance gate without projecting UD twice."""
-
-        if (
-            not candidate
-            or candidate.startswith("*")
-            or candidate.endswith("+?")
-        ):
-            return False
-        # Every match is wholly inside one plus-delimited parser part, so this
-        # C-level regular-expression fast path is exact. Escaped-plus tags and
-        # malformed edge cases fall through to the escape-aware scan below.
-        if FAST_ANALYSIS_TAG_RE.search(candidate) is not None:
-            return True
-
-        # ``parse_analysis`` first splits on unescaped ``+`` and then searches
-        # each part for ``<([^<>]+)>``.  Mirror only that acceptance predicate
-        # here; the caller still performs the full projection exactly once when
-        # materializing candidates.  This avoids doing all UD/morpheme work a
-        # second time solely for protocol validation.
-        escaped = False
-        tag_length = -1
-        for character in candidate:
-            was_escaped = escaped
-            if escaped:
-                escaped = False
-            elif character == "\\":
-                escaped = True
-
-            if character == "+" and not was_escaped:
-                tag_length = -1
-            elif character == "<":
-                tag_length = 0
-            elif character == ">":
-                if tag_length > 0:
-                    return True
-                tag_length = -1
-            elif tag_length >= 0:
-                tag_length += 1
-        return False
 
     def close(self) -> None:
         """Close the pipe; a later query may lazily start a fresh worker."""
@@ -1222,7 +1179,7 @@ class OpenClassGuesser:
                     max_bytes=max_bytes,
                     max_request_bytes=MAX_GUESS_REQUEST_BYTES,
                 )
-                problem = self._response_protocol_problem(
+                problem, validated_analyses = self._validate_response(
                     surface, response.lines
                 )
             except _LookupProtocolFailure as exc:
@@ -1235,7 +1192,10 @@ class OpenClassGuesser:
                     "response discarded"
                 )
             if problem is None:
-                return response
+                return replace(
+                    response,
+                    validated_analyses=validated_analyses,
+                )
             if attempt == 0:
                 first_problem = problem
                 remaining = deadline - time.monotonic()
@@ -1270,52 +1230,70 @@ class OpenClassGuesser:
             )
         raise AssertionError("bounded HFST protocol retry did not terminate")
 
-    def _response_protocol_problem(
+    def _validate_response(
         self, surface: str, lines: Sequence[str]
-    ) -> str | None:
+    ) -> tuple[str | None, tuple[Analysis | None, ...]]:
+        """Validate strict HFST records and parse each candidate exactly once."""
+
         if not lines:
-            return "zero lines"
+            return "zero lines", ()
         candidate_records = 0
         negative_records = 0
+        validated_analyses: list[Analysis | None] = []
         for line in lines:
             fields = line.split("\t")
             if not fields:
-                return "empty record"
+                return "empty record", ()
             if fields[0] != surface:
-                return f"surface {fields[0]!r}"
+                return f"surface {fields[0]!r}", ()
             if self._optimized:
                 if fields == [surface, surface, "+?"]:
                     negative_records += 1
+                    validated_analyses.append(None)
                     continue
                 if len(fields) != 2:
-                    return "optimized record does not have exactly two fields"
+                    return (
+                        "optimized record does not have exactly two fields",
+                        (),
+                    )
             else:
                 if fields == [surface, f"{surface}+?", "inf"]:
                     negative_records += 1
+                    validated_analyses.append(None)
                     continue
                 if len(fields) != 3:
-                    return "standard record does not have exactly three fields"
+                    return (
+                        "standard record does not have exactly three fields",
+                        (),
+                    )
                 try:
                     weight = float(fields[2])
                 except ValueError:
-                    return "standard record has a nonnumeric weight"
+                    return "standard record has a nonnumeric weight", ()
                 if not math.isfinite(weight):
-                    return "standard candidate has a nonfinite weight"
+                    return "standard candidate has a nonfinite weight", ()
 
             candidate = fields[1]
             if not candidate:
-                return "empty candidate"
+                return "empty candidate", ()
             if any(character in candidate for character in "[]{}"):
-                return "candidate contains a control marker"
-            if not self._worker._candidate_analysis_shape_valid(candidate):
-                return "candidate is not a valid analysis"
+                return "candidate contains a control marker", ()
+            parsed = parse_analysis(
+                candidate,
+                source="guesser",
+                guessed=True,
+                ud_profile=self.ud_profile,
+            )
+            if parsed is None or not parsed.tags:
+                return "candidate is not a valid analysis", ()
+            validated_analyses.append(parsed)
             candidate_records += 1
         if negative_records:
             if negative_records != 1:
-                return "duplicate negative records"
+                return "duplicate negative records", ()
             if candidate_records:
-                return "mixed negative and candidate records"
-        return None
+                return "mixed negative and candidate records", ()
+        return None, tuple(validated_analyses)
 
     @staticmethod
     def _eligible_surface(surface: str) -> bool:
@@ -1410,33 +1388,25 @@ class OpenClassGuesser:
             )
             return _GuessOutcome((), False, "failure")
 
-        raw_lines = raw_response.lines
-        if any(CYCLE_MARKER in line for line in raw_lines):
-            warnings.warn(
-                "HFST guesser reported a cyclic response; discarding partial "
-                "candidates and returning an explicit unknown analysis for this OOV",
-                RuntimeWarning,
-                stacklevel=3,
+        validated_analyses = raw_response.validated_analyses
+        if validated_analyses is None:
+            # Private tests and compatibility callers may inject a synthetic
+            # raw envelope. Validate it under the same grammar before use.
+            if any(CYCLE_MARKER in line for line in raw_response.lines):
+                warnings.warn(
+                    "HFST guesser reported a cyclic response; discarding partial "
+                    "candidates and returning an explicit unknown analysis for this OOV",
+                    RuntimeWarning,
+                    stacklevel=3,
+                )
+                return _GuessOutcome((), False, "cyclic_response")
+            problem, validated_analyses = self._validate_response(
+                surface, raw_response.lines
             )
-            return _GuessOutcome((), False, "cyclic_response")
+            if problem is not None:
+                return _GuessOutcome((), False, "protocol_failure")
 
-        for line in raw_lines:
-            if not line:
-                continue
-            fields = line.split("\t")
-            if (
-                fields == [surface, surface, "+?"]
-                or fields == [surface, f"{surface}+?", "inf"]
-            ):
-                continue
-            if len(fields) < 2 or fields[0] != surface:
-                continue
-            parsed = parse_analysis(
-                fields[1],
-                source="guesser",
-                guessed=True,
-                ud_profile=self.ud_profile,
-            )
+        for parsed in validated_analyses:
             if parsed is None:
                 continue
             if productive_root_kind(surface, parsed.lemma) is None:
