@@ -80,10 +80,10 @@ manifest-bound Project.JJ runtime. The exact original inputs are:
 
 The candidate pipeline selects the three required executables and derives the
 smallest non-system DLL set recursively reached by their ordinary or
-delay-load PE imports. The real Windows runner must bind the final file count,
-prove every retained PE is AMD64, and reject any dependency outside the
-checked policy. Duplicate ICU/GCC runtime DLLs in the two inputs must be
-byte-identical before they are coalesced. Candidate components include
+delay-load PE imports. The reviewed Windows runner bound three executables and
+16 DLLs, proved every retained PE is AMD64, and rejected every dependency
+outside the checked policy. Duplicate ICU/GCC runtime DLLs in the two inputs
+must be byte-identical before they are coalesced. Bound components include
 HFST/libhfst, CG-3/libcg3, foma, OpenFst, ICU 74.2, Readline
 8.2, GNU Termcap 1.3.1, SQLite 3.46.0, zlib 1.3.1, dlfcn-win32 1.4.1, GCC
 13.3 runtime libraries, and MinGW-w64 12.0.0 runtime components under the

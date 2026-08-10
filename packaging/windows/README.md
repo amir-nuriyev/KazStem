@@ -13,15 +13,21 @@ requires duplicate DLLs to be byte-identical; copies only three commands plus
 their recursively reached DLLs; executes the command version probes; binds the
 ordinary and delay-load PE graph into the runtime manifest; and emits a
 proposed unified package lock. The proposal is a bootstrap artifact, not a
-release: its exact Windows entry must be reviewed and checked in before the
-canonical wheel or any ready-run archive is built.
+release. Run `31418211507` produced the independently audited runtime now bound
+by the checked package lock: bundle
+`17a69ae11ff3fd92a555e8c95571223cbe8b217ec409a0b9b368f0aed90ee465`,
+with a 20,697-byte manifest whose SHA-256 is
+`554a776a942e2db65ca34bb6e05e0c258976848203cbece38ababc0067d1ee46`.
+Any native input, recipe, or manifest-contract change requires a new proposal,
+review, and checked lock identity before a ready-run archive is built.
 
-The candidate native closure is deliberately flat under `usr/bin`, so Windows
+The audited native closure is deliberately flat under `usr/bin`, so Windows
 can resolve every non-system DLL beside the exact helper executable. The
 pipeline targets the three required commands and their smallest recursively
-reachable AMD64 DLL set; the real runner binds the final file count and proves
-that its only unbundled imports are explicitly allowlisted Windows system
-DLLs. There are no symlinks, installers, registry changes, services,
+reachable AMD64 DLL set. The bound runtime contains three executables and 16
+DLLs (51,315,200 payload bytes); all are AMD64 PE32+, and its only unbundled
+imports are `advapi32.dll`, `kernel32.dll`, `msvcrt.dll`, and `user32.dll`.
+There are no symlinks, installers, registry changes, services,
 administrator requirements, neural weights, network clients, or OpenSSL.
 
 Run the private inventory workflow first:
@@ -41,8 +47,8 @@ rejects absolute runner paths in all textual evidence, and uploads the
 candidate runtime plus proposed lock for review. It never creates a tag or
 GitHub release.
 
-After the Windows entry is checked in, rebuild the one canonical 0.2.3 wheel
-and sdist, then rebuild Mac, Linux, and Windows from that same source identity.
+With the Windows entry checked in, rebuild the one canonical 0.2.3 wheel and
+sdist, then rebuild Mac, Linux, and Windows from that same source identity.
 The Windows frozen launcher uses CPython 3.14.3, PyInstaller 6.22.0, and the
 checked `kazstem-minimal.spec`. The final release workflow must perform two
 from-scratch builds in distinct roots and require byte-identical normalized

@@ -117,10 +117,19 @@ not infer a Windows 10 compatibility floor from a Server 2022 build.
 It consumes the exact Project.JJ HFST and CG-3 ZIPs fixed by
 `scripts/platform_runtime_sources.windows-x86_64.lock.json`, verifies their
 entire path/type/CRC inventory, and targets only the three required commands
-plus their recursively reached non-system DLLs. The real runner binds the
-final count and must prove every retained file is AMD64 PE; every ordinary and
-delay-load import must resolve to an adjacent manifest-bound DLL or the
-checked Windows system allowlist. OpenSSL must not be in that closure.
+plus their recursively reached non-system DLLs. Every ordinary and delay-load
+import must resolve to an adjacent manifest-bound DLL or the checked Windows
+system allowlist; every retained file must be AMD64 PE. OpenSSL must not be in
+that closure.
+
+The reviewed `windows-2022` inventory run `31418211507` binds runtime bundle
+`17a69ae11ff3fd92a555e8c95571223cbe8b217ec409a0b9b368f0aed90ee465`
+to f03e. Its 20,697-byte manifest has SHA-256
+`554a776a942e2db65ca34bb6e05e0c258976848203cbece38ababc0067d1ee46`.
+The closure is three executables plus 16 DLLs (51,315,200 payload bytes), all
+AMD64 PE32+; only `advapi32.dll`, `kernel32.dll`, `msvcrt.dll`, and
+`user32.dll` cross the bundle boundary. This inventory is a native-runtime
+input, not a ready-run release asset.
 
 Windows cannot portably preserve a denying directory ACL through an ordinary
 ZIP. Runtime provenance therefore does not reinterpret Windows `READONLY`

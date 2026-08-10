@@ -469,6 +469,11 @@ class PlatformRuntimeManifestTests(unittest.TestCase):
             / "qazmorph"
             / "platform_runtime_assets.lock.json"
         ).read_bytes()
+        self.assertEqual(len(base_lock), 1380)
+        self.assertEqual(
+            hashlib.sha256(base_lock).hexdigest(),
+            "fbed6da1e6a4be5c97d3e36723d48ec131ccbb3a8f05d22cf2e1e28d4690c4b2",
+        )
         linux_source = (
             PROJECT_ROOT
             / "scripts"
@@ -1035,6 +1040,26 @@ class PlatformRuntimeManifestTests(unittest.TestCase):
         self.assertEqual(
             entries[("linux", "x86_64")]["bundle_id"],
             "39a01ea673d024b0d6080739b5bb23c76daf0f7ed7bdb95dd1157d9dce4b627e",
+        )
+        self.assertEqual(
+            sorted(entries),
+            [("darwin", "arm64"), ("linux", "x86_64"), ("windows", "x86_64")],
+        )
+        windows = entries[("windows", "x86_64")]
+        self.assertEqual(
+            windows["resource_bundle_ids"],
+            ["f03e703d3e2a67044a7d91fd7d575b92cb4e61aa782fb67cff91b0a5ff0ebd5a"],
+        )
+        self.assertEqual(
+            windows["bundle_id"],
+            "17a69ae11ff3fd92a555e8c95571223cbe8b217ec409a0b9b368f0aed90ee465",
+        )
+        self.assertEqual(
+            windows["manifest"],
+            {
+                "bytes": 20697,
+                "sha256": "554a776a942e2db65ca34bb6e05e0c258976848203cbece38ababc0067d1ee46",
+            },
         )
         manifest_include = (PROJECT_ROOT / "MANIFEST.in").read_text(
             encoding="utf-8"

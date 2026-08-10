@@ -10,7 +10,7 @@ Unified native-runtime and Windows portability release.
   corresponding-source lock, PyInstaller spec, and recursive ELF audit.
 - Adds a real Windows x86-64 runtime pipeline for `windows-2022`, using exact
   Project.JJ inputs and targeting the smallest proven PE closure with no
-  OpenSSL; the final file count is bound only after the native runner audit.
+  OpenSSL; the audited closure is bound at three executables plus 16 DLLs.
 - Statically validates every regular and delay-load PE import, rejects missing,
   unreachable, non-AMD64, ambiguous, or unsafe runtime entries, and binds the
   closure into the content-addressed runtime manifest.
