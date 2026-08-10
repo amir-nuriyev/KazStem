@@ -473,7 +473,7 @@ class PlatformRuntimeManifestTests(unittest.TestCase):
                         str(root / "audit.json"),
                     ],
                 ), self.assertRaisesRegex(
-                    windows_evidence.EvidenceError, "absolute build roots leaked"
+                    windows_evidence.EvidenceError, "absolute machine paths leaked"
                 ):
                     windows_evidence.main()
 
@@ -482,9 +482,23 @@ class PlatformRuntimeManifestTests(unittest.TestCase):
             root = Path(temporary) / "evidence"
             root.mkdir()
             (root / "record.json").write_text(
-                json.dumps({"build_roots": ["build-a", "build-b"]}), encoding="utf-8"
+                json.dumps(
+                    {
+                        "build_roots": ["build-a", "build-b"],
+                        "documentation": [
+                            "https://github.com/hfst/hfst/releases/",
+                            "http://example.invalid/hfst/source/",
+                        ],
+                    }
+                ),
+                encoding="utf-8",
             )
-            (root / "record.txt").write_text("bundle/platform-runtimes\n", encoding="utf-8")
+            (root / "record.txt").write_text(
+                "bundle/platform-runtimes\n"
+                "HFST 3.17.2\n"
+                "2026/08/10 and/or /version\n",
+                encoding="utf-8",
+            )
             output = root / "audit.json"
             output.write_text(r"C:\runner\temp\self", encoding="utf-8")
             with mock.patch(
@@ -503,6 +517,42 @@ class PlatformRuntimeManifestTests(unittest.TestCase):
             report = json.loads(output.read_text(encoding="utf-8"))
             self.assertEqual(report["result"], "pass")
             self.assertEqual(report["text_files_checked"], ["record.json", "record.txt"])
+
+    def test_windows_evidence_audit_rejects_all_absolute_path_forms(self) -> None:
+        for leaked in (
+            r"D:\unrelated\build\record.json",
+            r"\\?\C:\runner\temp\record.json",
+            r"\??\C:\runner\temp\record.json",
+            r"\\server\share\record.json",
+            r"\Windows\System32\kernel32.dll",
+            r"path:\Windows\System32\kernel32.dll",
+            r"path:\\server\share\record.json",
+            "/Users/RUNNER~1/record.json",
+            "file:///C:/runner/temp/record.json",
+            "xhttps://server/share/record.json",
+            "label foohttps://server/share/record.json",
+        ):
+            with self.subTest(leaked=leaked), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary) / "evidence"
+                root.mkdir()
+                (root / "record.json").write_text(
+                    json.dumps({"path": leaked}), encoding="utf-8"
+                )
+                with mock.patch(
+                    "sys.argv",
+                    [
+                        "audit_evidence_paths.py",
+                        "--root",
+                        str(root),
+                        "--forbid",
+                        r"C:\runner\temp",
+                        "--output",
+                        str(root / "audit.json"),
+                    ],
+                ), self.assertRaisesRegex(
+                    windows_evidence.EvidenceError, "absolute machine paths leaked"
+                ):
+                    windows_evidence.main()
 
     def test_windows_evidence_audit_rejects_lexical_and_resolved_root_aliases(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -528,7 +578,7 @@ class PlatformRuntimeManifestTests(unittest.TestCase):
                             str(root / "audit.json"),
                         ],
                     ), self.assertRaisesRegex(
-                        windows_evidence.EvidenceError, "absolute build roots leaked"
+                        windows_evidence.EvidenceError, "absolute machine paths leaked"
                     ):
                         windows_evidence.main()
 
@@ -585,7 +635,8 @@ class PlatformRuntimeManifestTests(unittest.TestCase):
                     return f"-n {option} --pipe-mode\n".encode()
                 if "--version" in command:
                     self.assertIn("--pipe-mode=both", command)
-                    return b"HFST 3.17.2\n"
+                    invoked = str(command[0]).replace("/", "\\").upper()
+                    return f"{invoked}: HFST 3.17.2\r\n".encode()
                 if executable in {"hfst-regexp2fst.exe", "hfst-fst2fst.exe"}:
                     destination = Path(command[command.index("-o") + 1])
                     destination.write_bytes(b"fake-fst")
@@ -607,9 +658,95 @@ class PlatformRuntimeManifestTests(unittest.TestCase):
             ):
                 self.assertEqual(windows_probe.main(), 0)
             report = json.loads(output.read_text(encoding="utf-8"))
-            self.assertEqual(report["semantic_query"]["status"], "pass")
-            self.assertEqual(report["semantic_query"]["control_nonempty_rows"], 2)
-            self.assertEqual(report["semantic_query"]["bounded_nonempty_rows"], 1)
+            self.assertEqual(
+                report["semantic_query"],
+                {
+                    "bound": 1,
+                    "bounded_nonempty_rows": 1,
+                    "bounded_prefix_matches_control": True,
+                    "control_nonempty_rows": 2,
+                    "helper": "hfst-optimized-lookup",
+                    "resource": "two-analysis-probe.hfstol",
+                    "resource_kind": "generated two-analysis FST",
+                    "status": "pass",
+                    "surface": "a",
+                },
+            )
+            encoded_report = json.dumps(report).casefold().replace("\\", "/")
+            self.assertNotIn(str(root).casefold().replace("\\", "/"), encoded_report)
+            self.assertNotIn(
+                str(root.parent).casefold().replace("\\", "/"),
+                encoded_report,
+            )
+            self.assertTrue(
+                all(
+                    str(helper["version_output"]).startswith("hfst/bin/")
+                    for helper in report["helpers"]
+                )
+            )
+
+    def test_windows_probe_normalizes_case_and_slash_path_variants(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "HFST-Probe"
+            executable = root / "hfst" / "bin" / "hfst-lookup.exe"
+            executable.parent.mkdir(parents=True)
+            executable.write_bytes(b"fixture")
+            forward = str(executable).replace("\\", "/")
+            backward_upper = forward.replace("/", "\\").upper()
+            observed = windows_probe.normalize_version_output(
+                f"{backward_upper}: first\r\n{forward}: second\n".encode(),
+                root=root,
+                executable=executable,
+                logical_path="hfst/bin/hfst-lookup.exe",
+            )
+            self.assertEqual(
+                observed,
+                "hfst/bin/hfst-lookup.exe: first\n"
+                "hfst/bin/hfst-lookup.exe: second",
+            )
+            self.assertNotIn(str(root).casefold(), observed.casefold())
+            self.assertNotIn("\\", observed)
+
+            for leaked in (
+                r"C:\Windows\System32\kernel32.dll",
+                r"\\?\C:\runner\temp\hfst-lookup.exe",
+                r"\??\C:\runner\temp\hfst-lookup.exe",
+                r"\\server\share\hfst-lookup.exe",
+                "file:///C:/runner/temp/hfst-lookup.exe",
+                "D://runner//temp//hfst-lookup.exe",
+                r"\Windows\System32\kernel32.dll",
+                r"path:\Windows\System32\kernel32.dll",
+                r"path:\\server\share\hfst-lookup.exe",
+                "/Users/RUNNER~1/hfst-lookup.exe",
+                "xhttps://server/share/hfst-lookup.exe",
+                "label foohttps://server/share/hfst-lookup.exe",
+            ):
+                with self.subTest(leaked=leaked):
+                    with self.assertRaises(windows_probe.ProbeError):
+                        windows_probe.normalize_version_output(
+                            f"{leaked}: HFST 3.17.2\n".encode(),
+                            root=root,
+                            executable=executable,
+                            logical_path="hfst/bin/hfst-lookup.exe",
+                        )
+
+            for clean in (
+                "HFST 3.17.2",
+                "Documentation: https://github.com/hfst/hfst/releases/",
+                "Source: http://example.invalid/hfst/source/",
+                "logical helper: hfst/bin/hfst-lookup.exe",
+                "built 2026/08/10 and/or /version",
+            ):
+                with self.subTest(clean=clean):
+                    self.assertEqual(
+                        windows_probe.normalize_version_output(
+                            (clean + "\n").encode(),
+                            root=root,
+                            executable=executable,
+                            logical_path="hfst/bin/hfst-lookup.exe",
+                        ),
+                        clean,
+                    )
 
     def test_windows_builder_reports_x_ok_without_using_it_as_the_gate(self) -> None:
         builder = (
@@ -738,6 +875,14 @@ class PlatformRuntimeManifestTests(unittest.TestCase):
         self.assertIn("bounded-helper-options.json", workflow)
         self.assertIn("probe_hfst_bounds.py", workflow)
         self.assertIn("audit_evidence_paths.py", workflow)
+        self.assertIn(
+            "test_windows_evidence_audit_rejects_all_absolute_path_forms",
+            workflow,
+        )
+        self.assertIn(
+            "test_windows_probe_normalizes_case_and_slash_path_variants",
+            workflow,
+        )
         self.assertIn(
             "test_windows_hard_stdout_cap_never_caches_partial_candidates",
             workflow,

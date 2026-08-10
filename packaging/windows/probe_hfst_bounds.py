@@ -6,14 +6,18 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+WINDOWS_PACKAGING_ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(WINDOWS_PACKAGING_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
+from evidence_path_contract import absolute_path_kind  # noqa: E402
 from qazmorph.backend import BackendError  # noqa: E402
 from qazmorph.guesser import _PersistentLookupWorker  # noqa: E402
 
@@ -28,6 +32,44 @@ HELPERS = (
 
 class ProbeError(RuntimeError):
     pass
+
+
+def normalize_version_output(
+    payload: bytes,
+    *,
+    root: Path,
+    executable: Path,
+    logical_path: str,
+) -> str:
+    """Replace every known machine-local spelling with a logical path."""
+
+    text = payload.decode("utf-8", "strict").replace("\\", "/")
+    replacements = {
+        str(executable).replace("\\", "/"): logical_path,
+        str(executable.resolve(strict=False)).replace("\\", "/"): logical_path,
+        str(root).replace("\\", "/"): "hfst-probe-root",
+        str(root.resolve(strict=False)).replace("\\", "/"): "hfst-probe-root",
+    }
+    physical_spellings = sorted(
+        (spelling.rstrip("/") for spelling in replacements if spelling),
+        key=len,
+        reverse=True,
+    )
+    for spelling in physical_spellings:
+        replacement = replacements[spelling]
+        text = re.sub(re.escape(spelling), replacement, text, flags=re.IGNORECASE)
+    normalized = "\n".join(line.rstrip() for line in text.splitlines()).strip()
+    if not normalized:
+        raise ProbeError("helper emitted no version output")
+    folded = normalized.casefold()
+    if any(spelling.casefold() in folded for spelling in physical_spellings):
+        raise ProbeError("machine-local helper path survived version normalization")
+    residual_kind = absolute_path_kind(normalized)
+    if residual_kind is not None:
+        raise ProbeError(
+            f"{residual_kind} path survived version normalization"
+        )
+    return normalized
 
 
 def run(command: list[str], *, input_bytes: bytes | None = None) -> bytes:
@@ -74,11 +116,15 @@ def main() -> int:
             raise ProbeError(
                 f"{name} does not document -n/{long_option}/--pipe-mode"
             )
-        version = run(
+        raw_version = run(
             [str(executable), "-n", "1", "--pipe-mode=both", "--version"]
-        ).decode("utf-8", "strict").strip()
-        if not version:
-            raise ProbeError(f"{name} emitted no version output")
+        )
+        version = normalize_version_output(
+            raw_version,
+            root=root,
+            executable=executable,
+            logical_path=relative,
+        )
         records.append(
             {
                 "helper": name,

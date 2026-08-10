@@ -6,7 +6,14 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path, PurePosixPath, PureWindowsPath
+import sys
 from typing import Any
+
+
+WINDOWS_PACKAGING_ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(WINDOWS_PACKAGING_ROOT))
+
+from evidence_path_contract import absolute_path_kind  # noqa: E402
 
 
 TEXT_SUFFIXES = {".json", ".jsonl", ".log", ".md", ".sha256", ".txt"}
@@ -95,12 +102,20 @@ def main() -> int:
             for token in forbidden:
                 if token in observed:
                     failures.append({"file": relative, "forbidden_root": token})
+            residual_kind = absolute_path_kind(value)
+            if residual_kind is not None:
+                failures.append(
+                    {
+                        "file": relative,
+                        "forbidden_root": f"<{residual_kind}-path>",
+                    }
+                )
         checked.append(relative)
     if not checked:
         raise EvidenceError("no textual evidence files were checked")
     if failures:
         raise EvidenceError(
-            "absolute build roots leaked into evidence: "
+            "absolute machine paths leaked into evidence: "
             + json.dumps(failures, ensure_ascii=False, sort_keys=True)
         )
     result = {

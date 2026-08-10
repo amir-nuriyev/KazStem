@@ -54,7 +54,9 @@ jobs:
             tests.test_provenance_manifests.PlatformRuntimeManifestTests.test_windows_evidence_audit_decodes_json_and_scans_plain_text `
             tests.test_provenance_manifests.PlatformRuntimeManifestTests.test_windows_evidence_audit_accepts_logical_labels_and_skips_its_output `
             tests.test_provenance_manifests.PlatformRuntimeManifestTests.test_windows_evidence_audit_rejects_invalid_json_and_utf8 `
+            tests.test_provenance_manifests.PlatformRuntimeManifestTests.test_windows_evidence_audit_rejects_all_absolute_path_forms `
             tests.test_provenance_manifests.PlatformRuntimeManifestTests.test_windows_hfst_bound_probe_has_timeout_and_semantic_control `
+            tests.test_provenance_manifests.PlatformRuntimeManifestTests.test_windows_probe_normalizes_case_and_slash_path_variants `
             tests.test_backend.ResourceManifestTests.test_windows_integrity_seal_uses_fresh_hashes_not_posix_directory_bits `
             tests.test_backend.ResourceManifestTests.test_windows_integrity_seal_never_accepts_a_cached_or_partial_inventory `
             tests.test_backend.ResourceManifestTests.test_windows_exe_availability_does_not_depend_on_posix_x_ok `
