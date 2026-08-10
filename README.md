@@ -16,6 +16,26 @@ Kazakh. Its primary command is `kazstem`; the compatibility commands
 remain available. KazStem exposes a MyStem-like command-line interface and a
 typed Python API, but its implementation is independent of MyStem.
 
+## Install or run
+
+```bash
+python -m pip install kazstem
+```
+
+The [PyPI package](https://pypi.org/project/kazstem/) is a pure-Python library
+and CLI layer. It installs the `kazstem`, `qazmorph`, and `mystem-kz` commands,
+but deliberately does not hide platform-specific HFST/CG executables, compiled
+Kazakh resources, or neural weights inside a universal wheel. A complete local
+analysis run therefore also needs the verified runtime/resource bundle described
+under [Reproducible reference build](#reproducible-reference-build).
+
+For a no-install command-line download, use the platform-labelled **ready-run**
+archives on [GitHub Releases](https://github.com/amir-nuriyev/KazStem/releases).
+They include the matching finite-state resources and native runtime; each is
+published with checksums and corresponding source, and contains its own
+verification records. The browser link above is the separate client-only proof
+of concept.
+
 ## Features
 
 - lossless Unicode tokenization with exact character offsets and reconstruction;
