@@ -367,7 +367,7 @@ BibTeX users can cite [CITATION.bib](CITATION.bib):
   author  = {Amir Nuriyev},
   title   = {KazStem: an ambiguity-preserving Kazakh morphological analyzer and generator},
   year    = {2026},
-  version = {0.2.0},
+  version = {0.2.1},
   url     = {https://github.com/amir-nuriyev/KazStem},
   license = {GPL-3.0-or-later}
 }

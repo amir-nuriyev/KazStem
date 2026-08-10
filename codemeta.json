@@ -3,7 +3,7 @@
   "@type": "SoftwareSourceCode",
   "name": "KazStem",
   "description": "Ambiguity-preserving Kazakh morphological analyzer and generator with a MyStem-like CLI.",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "datePublished": "2026-08-10",
   "codeRepository": "https://github.com/amir-nuriyev/KazStem",
   "issueTracker": "https://github.com/amir-nuriyev/KazStem/issues",
