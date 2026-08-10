@@ -6,7 +6,7 @@ on:
       tag:
         description: Existing GitHub release tag whose audited assets will be published
         required: true
-        default: v0.2.0
+        default: v0.2.1
 
 permissions:
   contents: read
@@ -20,20 +20,106 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - name: Download the existing audited release artifacts
+      - name: Download and verify the existing audited release artifacts
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-          mkdir dist
+          if [[ ! "$RELEASE_TAG" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+            echo "release tag must be vMAJOR.MINOR.PATCH" >&2
+            exit 1
+          fi
+          VERSION="${BASH_REMATCH[1]}"
+          mkdir release-assets dist
           gh release download "$RELEASE_TAG" \
             --repo "$GITHUB_REPOSITORY" \
-            --pattern 'kazstem-*.whl' \
-            --pattern 'kazstem-*.tar.gz' \
-            --dir dist
-          test "$(find dist -maxdepth 1 -type f -name 'kazstem-*.whl' | wc -l)" -eq 1
-          test "$(find dist -maxdepth 1 -type f -name 'kazstem-*.tar.gz' | wc -l)" -eq 1
+            --dir release-assets
+          python - "$VERSION" release-assets/SHA256SUMS <<'PY'
+          import pathlib
+          import re
+          import sys
+
+          version, checksum_name = sys.argv[1:]
+          checksum_path = pathlib.Path(checksum_name)
+          entries = {}
+          for line_number, line in enumerate(
+              checksum_path.read_text(encoding="utf-8").splitlines(), start=1
+          ):
+              match = re.fullmatch(r"([0-9a-f]{64})  ([^/\\]+)", line)
+              if match is None:
+                  raise SystemExit(
+                      f"unsafe or malformed SHA256SUMS line {line_number}: {line!r}"
+                  )
+              digest, name = match.groups()
+              if name in entries:
+                  raise SystemExit(f"duplicate SHA256SUMS entry: {name}")
+              entries[name] = digest
+
+          required = {
+              f"kazstem-{version}-py3-none-any.whl",
+              f"kazstem-{version}.tar.gz",
+          }
+          missing = sorted(required - entries.keys())
+          if missing:
+              raise SystemExit(
+                  "SHA256SUMS does not bind required distribution(s): "
+                  + ", ".join(missing)
+              )
+          PY
+          (
+            cd release-assets
+            sha256sum --strict -c SHA256SUMS
+          )
+          WHEEL="release-assets/kazstem-${VERSION}-py3-none-any.whl"
+          SDIST="release-assets/kazstem-${VERSION}.tar.gz"
+          test -f "$WHEEL"
+          test -f "$SDIST"
+          python - "$VERSION" "$WHEEL" "$SDIST" <<'PY'
+          import email
+          import pathlib
+          import sys
+          import tarfile
+          import zipfile
+
+          version, wheel_name, sdist_name = sys.argv[1:]
+
+          with zipfile.ZipFile(wheel_name) as archive:
+              metadata_names = [
+                  name for name in archive.namelist()
+                  if name.endswith(".dist-info/METADATA")
+              ]
+              if len(metadata_names) != 1:
+                  raise SystemExit("wheel must contain exactly one METADATA file")
+              wheel_metadata = email.message_from_bytes(
+                  archive.read(metadata_names[0])
+              )
+
+          with tarfile.open(sdist_name, "r:gz") as archive:
+              pkg_info_names = [
+                  member.name for member in archive.getmembers()
+                  if member.isfile() and member.name.count("/") == 1
+                  and member.name.endswith("/PKG-INFO")
+              ]
+              if len(pkg_info_names) != 1:
+                  raise SystemExit("sdist must contain exactly one top-level PKG-INFO")
+              extracted = archive.extractfile(pkg_info_names[0])
+              if extracted is None:
+                  raise SystemExit("could not read sdist PKG-INFO")
+              sdist_metadata = email.message_from_binary_file(extracted)
+
+          for label, metadata in (
+              ("wheel", wheel_metadata),
+              ("sdist", sdist_metadata),
+          ):
+              if metadata["Name"] != "kazstem":
+                  raise SystemExit(f"{label} has unexpected Name: {metadata['Name']!r}")
+              if metadata["Version"] != version:
+                  raise SystemExit(
+                      f"{label} has unexpected Version: {metadata['Version']!r}"
+                  )
+          PY
+          cp "$WHEEL" "$SDIST" dist/
 
       - name: Publish with PyPI trusted publishing
         uses: pypa/gh-action-pypi-publish@release/v1

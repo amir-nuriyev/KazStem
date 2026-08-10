@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.1 — 2026-08-10
+
+Packaging-only patch release.
+
+- Removes an invalid PyPI Trove classifier rejected during the first trusted
+  publishing attempt.
+- Adds release-asset checksum and embedded name/version validation to the PyPI
+  trusted-publishing workflow.
+- Leaves the analyzer, generator, resource contract, and reported evaluation
+  results unchanged from 0.2.0.
+
 ## 0.2.0 — 2026-08-10
 
 First public KazStem release.
