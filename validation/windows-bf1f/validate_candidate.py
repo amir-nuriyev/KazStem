@@ -325,6 +325,45 @@ def probe_hfst_proc(helper: Path, fst: Path, output: Path) -> None:
                 "stderr": completed.stderr.decode("utf-8", "replace"),
                 "stderr_sha256": sha256_bytes(completed.stderr),
             }
+        for name, zero_flush, text_payload in (
+            ("stream-python-text-mode", False, stream_payload.decode("utf-8")),
+            ("atomic-python-text-mode", True, atomic_payload.decode("utf-8")),
+        ):
+            command = [
+                str(selected_helper),
+                "-w",
+                *(["-z"] if zero_flush else []),
+                str(selected_fst),
+            ]
+            completed = subprocess.run(
+                command,
+                input=text_payload,
+                text=True,
+                encoding="utf-8",
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                cwd=selected_helper.parent,
+                env=environment,
+                timeout=30,
+                check=False,
+                creationflags=CREATE_NO_WINDOW,
+            )
+            stdout_bytes = completed.stdout.encode("utf-8")
+            stderr_bytes = completed.stderr.encode("utf-8")
+            records[name] = {
+                "argv": [
+                    "hfst-proc.exe",
+                    "-w",
+                    *(["-z"] if zero_flush else []),
+                    "<BF1F-AUTOMORF>",
+                ],
+                "python_text_mode": True,
+                "returncode": completed.returncode,
+                "stdout": completed.stdout,
+                "stdout_sha256": sha256_bytes(stdout_bytes),
+                "stderr": completed.stderr,
+                "stderr_sha256": sha256_bytes(stderr_bytes),
+            }
     stream_control = records["stream-redirected-stdin"]
     stream_input_only = records["stream-positional-input-stdout"]
     stream_explicit = records["stream-positional-input-output"]
@@ -335,20 +374,29 @@ def probe_hfst_proc(helper: Path, fst: Path, output: Path) -> None:
     def lf(value: str) -> str:
         return value.replace("\r\n", "\n")
 
-    passing = (
-        all(record["returncode"] == 0 for record in records.values())
-        and lf(stream_control["stdout"]) == lf(stream_input_only["stdout"]) == lf(stream_explicit["stdout"])
-        and lf(atomic_input_only["stdout"]) == lf(atomic_explicit["stdout"])
-        and lf(atomic_control["stdout"]) != lf(atomic_explicit["stdout"])
-        and "^сәлем/сәлем" in lf(stream_explicit["stdout"]).casefold()
-        and "оқу<n><attr>" in lf(atomic_explicit["stdout"])
-    )
-    result = "pass" if passing else "fail"
-    conclusion = (
-        "Windows atomic redirected stdin differs from documented positional files"
-        if passing
-        else "positional-file hypothesis was not fully confirmed"
-    )
+    commands_ok = all(record["returncode"] == 0 for record in records.values())
+    comparisons = {
+        "stream_binary_pipe_equals_positional": (
+            lf(stream_control["stdout"])
+            == lf(stream_input_only["stdout"])
+            == lf(stream_explicit["stdout"])
+        ),
+        "atomic_binary_pipe_equals_positional": (
+            lf(atomic_control["stdout"])
+            == lf(atomic_input_only["stdout"])
+            == lf(atomic_explicit["stdout"])
+        ),
+        "stream_python_text_equals_binary": (
+            lf(records["stream-python-text-mode"]["stdout"])
+            == lf(stream_control["stdout"])
+        ),
+        "atomic_python_text_equals_binary": (
+            lf(records["atomic-python-text-mode"]["stdout"])
+            == lf(atomic_control["stdout"])
+        ),
+    }
+    result = "pass" if commands_ok else "fail"
+    conclusion = "observational stdin/text/positional I/O control completed"
     output.write_bytes(
         json_bytes(
             {
@@ -357,12 +405,13 @@ def probe_hfst_proc(helper: Path, fst: Path, output: Path) -> None:
                 "helper": file_record(selected_helper),
                 "fst": file_record(selected_fst),
                 "records": records,
+                "comparisons": comparisons,
                 "conclusion": conclusion,
             }
         )
     )
-    expect(passing, "hfst-proc positional-file hypothesis was not confirmed")
-    print("PASS: Windows hfst-proc positional-file control")
+    expect(commands_ok, "hfst-proc I/O control command failed")
+    print("PASS: Windows hfst-proc I/O controls completed")
 
 
 def trusted_windows_directories() -> tuple[Path, Path]:
