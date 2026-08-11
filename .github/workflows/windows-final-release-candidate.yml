@@ -4,6 +4,7 @@ name: Validate Windows final-release tooling (no publish)
 # enabled only after the immutable v0.2.3 tag and every hash-bound release input
 # have been frozen; this workflow cannot create tags, releases, or packages.
 on:
+  pull_request:
   workflow_dispatch:
     inputs:
       source_commit:
@@ -37,7 +38,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $true
           New-Item -ItemType Directory -Path (Join-Path $env:RUNNER_TEMP 'kazstem-final-contract') | Out-Null
-          $expected = '${{ inputs.source_commit }}'
+          $expected = '${{ github.event.pull_request.head.sha || inputs.source_commit }}'
           if ($expected -notmatch '^[0-9a-f]{40}$') { throw 'source_commit must be a full lowercase SHA-1' }
           $head = git rev-parse HEAD
           if ($head -ne $expected) { throw "checkout differs: expected=$expected observed=$head" }
