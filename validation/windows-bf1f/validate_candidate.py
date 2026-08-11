@@ -204,6 +204,71 @@ def run_integration_tests(repository: Path, site_packages: Path, output: Path) -
     print(stream.getvalue(), end="")
 
 
+def probe_hfst_proc(helper: Path, fst: Path, output: Path) -> None:
+    if sys.platform != "win32":
+        raise ValidationError("hfst-proc pipe probe requires native Windows")
+    selected_helper = helper.resolve(strict=True)
+    selected_fst = fst.resolve(strict=True)
+    payload = "Сәлем\nоқу\nҚазақстан\n".encode("utf-8")
+    environment = {
+        name: value
+        for name, value in os.environ.items()
+        if not name.upper().startswith("QAZMORPH_")
+        and not name.upper().endswith("_PROXY")
+        and not name.startswith("LD_")
+        and not name.startswith("DYLD_")
+        and name not in {"GLIBC_TUNABLES", "PATH", "PYTHONHOME", "PYTHONPATH"}
+    }
+    environment["PATH"] = ""
+    records: dict[str, Any] = {}
+    for name, extra in (
+        ("redirected-stdin-control", []),
+        ("redirected-stdin-explicit-input", ["--pipe-mode=input"]),
+    ):
+        command = [str(selected_helper), "-w", *extra, str(selected_fst)]
+        completed = subprocess.run(
+            command,
+            input=payload,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            cwd=selected_helper.parent,
+            env=environment,
+            timeout=30,
+            check=False,
+            creationflags=CREATE_NO_WINDOW,
+        )
+        stdout = completed.stdout.decode("utf-8", "strict")
+        records[name] = {
+            "argv": ["hfst-proc.exe", "-w", *extra, "<BF1F-AUTOMORF>"],
+            "returncode": completed.returncode,
+            "stdin_sha256": sha256_bytes(payload),
+            "stdout": stdout,
+            "stdout_sha256": sha256_bytes(completed.stdout),
+            "stderr": completed.stderr.decode("utf-8", "replace"),
+            "stderr_sha256": sha256_bytes(completed.stderr),
+        }
+    control = records["redirected-stdin-control"]
+    fixed = records["redirected-stdin-explicit-input"]
+    expect(control["returncode"] == 0 and fixed["returncode"] == 0, "hfst-proc pipe probe failed")
+    expect(control["stdout"] != fixed["stdout"], "hfst-proc pipe control did not distinguish explicit input mode")
+    expect("сәлем" in fixed["stdout"].casefold(), "explicit hfst-proc input mode did not analyze Сәлем")
+    expect("оқу<n><attr>" in fixed["stdout"], "explicit hfst-proc input mode did not analyze оқу")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_bytes(
+        json_bytes(
+            {
+                "schema": "kazstem-windows-hfst-proc-pipe-input-probe-v1",
+                "result": "pass",
+                "helper": file_record(selected_helper),
+                "fst": file_record(selected_fst),
+                "records": records,
+                "conclusion": "Windows redirected stdin requires --pipe-mode=input",
+            }
+        )
+    )
+    print("PASS: Windows hfst-proc redirected-stdin control")
+
+
 def trusted_windows_directories() -> tuple[Path, Path]:
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     kernel32.GetSystemDirectoryW.argtypes = [ctypes.c_wchar_p, ctypes.c_uint]
@@ -929,6 +994,11 @@ def parser() -> argparse.ArgumentParser:
     integration.add_argument("--site-packages", required=True, type=Path)
     integration.add_argument("--output", required=True, type=Path)
 
+    probe = commands.add_parser("probe-hfst-proc")
+    probe.add_argument("--helper", required=True, type=Path)
+    probe.add_argument("--fst", required=True, type=Path)
+    probe.add_argument("--output", required=True, type=Path)
+
     run = commands.add_parser("validate")
     run.add_argument("--repository", required=True, type=Path)
     run.add_argument("--base-commit", required=True)
@@ -956,6 +1026,8 @@ def main() -> int:
         prepare_lock(args.base_lock, args.output)
     elif args.command == "integration":
         run_integration_tests(args.repository, args.site_packages, args.output)
+    elif args.command == "probe-hfst-proc":
+        probe_hfst_proc(args.helper, args.fst, args.output)
     else:
         validate(args)
     return 0

@@ -174,6 +174,19 @@ jobs:
           "KAZSTEM_BF1F_SITE=$site" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "KAZSTEM_BF1F_LOCK=$candidateLock" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
+      - name: Probe hfst-proc redirected stdin with an explicit control
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $venvPython = Join-Path $env:KAZSTEM_BF1F_VENV 'Scripts/python.exe'
+          $probeCache = Join-Path $env:RUNNER_TEMP 'kazstem-bf1f-hfst-proc-probe-cache'
+          & $venvPython -I -B -X "pycache_prefix=$probeCache" `
+            validation/windows-bf1f/validate_candidate.py probe-hfst-proc `
+            --helper (Join-Path $env:KAZSTEM_BF1F_RUNTIME 'usr/bin/hfst-proc.exe') `
+            --fst (Join-Path $env:KAZSTEM_BF1F_RESOURCE 'kaz.automorf.hfstol') `
+            --output (Join-Path $env:KAZSTEM_BF1F_WORK 'evidence/hfst-proc-pipe-input.json')
+
       - name: Run the exact wheel resource suite and full native matrix
         shell: pwsh
         run: |
@@ -235,6 +248,7 @@ jobs:
             --output (Join-Path $work 'evidence/logical-evidence-path-audit.json')
 
       - name: Upload private acceptance evidence only
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: kazstem-windows-bf1f-acceptance-${{ github.run_id }}
