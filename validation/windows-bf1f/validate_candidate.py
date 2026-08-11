@@ -220,53 +220,105 @@ def probe_hfst_proc(helper: Path, fst: Path, output: Path) -> None:
         and name not in {"GLIBC_TUNABLES", "PATH", "PYTHONHOME", "PYTHONPATH"}
     }
     environment["PATH"] = ""
-    records: dict[str, Any] = {}
-    for name, extra in (
-        ("redirected-stdin-control", []),
-        ("redirected-stdin-explicit-input", ["--pipe-mode=input"]),
-    ):
-        command = [str(selected_helper), "-w", *extra, str(selected_fst)]
-        completed = subprocess.run(
-            command,
-            input=payload,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            cwd=selected_helper.parent,
-            env=environment,
-            timeout=30,
-            check=False,
-            creationflags=CREATE_NO_WINDOW,
-        )
-        stdout = completed.stdout.decode("utf-8", "strict")
-        records[name] = {
-            "argv": ["hfst-proc.exe", "-w", *extra, "<BF1F-AUTOMORF>"],
-            "returncode": completed.returncode,
-            "stdin_sha256": sha256_bytes(payload),
-            "stdout": stdout,
-            "stdout_sha256": sha256_bytes(completed.stdout),
-            "stderr": completed.stderr.decode("utf-8", "replace"),
-            "stderr_sha256": sha256_bytes(completed.stderr),
-        }
-    control = records["redirected-stdin-control"]
-    fixed = records["redirected-stdin-explicit-input"]
-    expect(control["returncode"] == 0 and fixed["returncode"] == 0, "hfst-proc pipe probe failed")
-    expect(control["stdout"] != fixed["stdout"], "hfst-proc pipe control did not distinguish explicit input mode")
-    expect("сәлем" in fixed["stdout"].casefold(), "explicit hfst-proc input mode did not analyze Сәлем")
-    expect("оқу<n><attr>" in fixed["stdout"], "explicit hfst-proc input mode did not analyze оқу")
     output.parent.mkdir(parents=True, exist_ok=True)
+    records: dict[str, Any] = {}
+    with tempfile.TemporaryDirectory(prefix="kazstem-hfst-proc-probe-") as temporary:
+        root = Path(temporary)
+        input_path = root / "input.utf8"
+        output_path = root / "output.utf8"
+        input_path.write_bytes(payload)
+        cases = (
+            (
+                "redirected-stdin-control",
+                [str(selected_helper), "-w", str(selected_fst)],
+                payload,
+                None,
+            ),
+            (
+                "positional-input-stdout",
+                [str(selected_helper), "-w", str(selected_fst), str(input_path)],
+                None,
+                None,
+            ),
+            (
+                "positional-input-output",
+                [
+                    str(selected_helper),
+                    "-w",
+                    str(selected_fst),
+                    str(input_path),
+                    str(output_path),
+                ],
+                None,
+                output_path,
+            ),
+        )
+        for name, command, stdin, declared_output in cases:
+            completed = subprocess.run(
+                command,
+                input=stdin,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                cwd=selected_helper.parent,
+                env=environment,
+                timeout=30,
+                check=False,
+                creationflags=CREATE_NO_WINDOW,
+            )
+            stdout_bytes = (
+                declared_output.read_bytes()
+                if declared_output is not None and declared_output.is_file()
+                else completed.stdout
+            )
+            records[name] = {
+                "argv": [
+                    "hfst-proc.exe",
+                    "-w",
+                    "<BF1F-AUTOMORF>",
+                    *(
+                        ["<UTF8-INPUT>", "<UTF8-OUTPUT>"]
+                        if declared_output is not None
+                        else (["<UTF8-INPUT>"] if stdin is None else [])
+                    ),
+                ],
+                "returncode": completed.returncode,
+                "stdin_sha256": sha256_bytes(payload) if stdin is not None else None,
+                "input_file": file_record(input_path) if stdin is None else None,
+                "stdout": stdout_bytes.decode("utf-8", "strict"),
+                "stdout_sha256": sha256_bytes(stdout_bytes),
+                "stderr": completed.stderr.decode("utf-8", "replace"),
+                "stderr_sha256": sha256_bytes(completed.stderr),
+            }
+    control = records["redirected-stdin-control"]
+    input_only = records["positional-input-stdout"]
+    explicit = records["positional-input-output"]
+    passing = (
+        control["returncode"] == input_only["returncode"] == explicit["returncode"] == 0
+        and input_only["stdout"] == explicit["stdout"]
+        and control["stdout"] != explicit["stdout"]
+        and "сәлем" in explicit["stdout"].casefold()
+        and "оқу<n><attr>" in explicit["stdout"]
+    )
+    result = "pass" if passing else "fail"
+    conclusion = (
+        "Windows redirected stdin differs from documented positional files"
+        if passing
+        else "positional-file hypothesis was not fully confirmed"
+    )
     output.write_bytes(
         json_bytes(
             {
-                "schema": "kazstem-windows-hfst-proc-pipe-input-probe-v1",
-                "result": "pass",
+                "schema": "kazstem-windows-hfst-proc-positional-file-probe-v1",
+                "result": result,
                 "helper": file_record(selected_helper),
                 "fst": file_record(selected_fst),
                 "records": records,
-                "conclusion": "Windows redirected stdin requires --pipe-mode=input",
+                "conclusion": conclusion,
             }
         )
     )
-    print("PASS: Windows hfst-proc redirected-stdin control")
+    expect(passing, "hfst-proc positional-file hypothesis was not confirmed")
+    print("PASS: Windows hfst-proc positional-file control")
 
 
 def trusted_windows_directories() -> tuple[Path, Path]:

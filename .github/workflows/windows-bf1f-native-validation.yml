@@ -174,7 +174,7 @@ jobs:
           "KAZSTEM_BF1F_SITE=$site" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "KAZSTEM_BF1F_LOCK=$candidateLock" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
-      - name: Probe hfst-proc redirected stdin with an explicit control
+      - name: Probe hfst-proc redirected stdin against positional files
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
