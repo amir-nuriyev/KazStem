@@ -101,6 +101,8 @@ def source_namespace(
         source_readme_template=args.source_readme_template,
         wheel=wheel,
         sdist=sdist,
+        python_build_identity=args.python_build_identity,
+        python_build_receipt=args.python_build_receipt,
         work_root=work,
         output=output,
         observation=None,
@@ -144,16 +146,11 @@ def finalize(args: argparse.Namespace) -> dict[str, Any]:
     if files_equal(source_execution_receipts[0], source_execution_receipts[1]):
         raise ReleaseError("per-root source execution receipts are unexpectedly identical")
 
-    roundtrip_roots = require_distinct_nonaliased(
-        args.roundtrip_root_a,
-        args.roundtrip_root_b,
-        label="sdist roundtrip",
-    )
-    all_fresh_roots = [*source_roots, *build_roots, *roundtrip_roots]
+    all_fresh_roots = [*source_roots, *build_roots]
     for index, first in enumerate(all_fresh_roots):
         for second in all_fresh_roots[index + 1 :]:
             if first == second or first in second.parents or second in first.parents or first.samefile(second):
-                raise ReleaseError("source/build/sdist roundtrip roots are not mutually nonaliased")
+                raise ReleaseError("source/build roots are not mutually nonaliased")
 
     frozen = [args.frozen_a.resolve(strict=True), args.frozen_b.resolve(strict=True)]
     wheels = [args.wheel_a.resolve(strict=True), args.wheel_b.resolve(strict=True)]
@@ -172,11 +169,11 @@ def finalize(args: argparse.Namespace) -> dict[str, Any]:
             identity,
             label=label,
             build_root=root,
-            roundtrip_root=roundtrip_roots[index],
             bootstrap_python=args.bootstrap_python,
             wheelhouse=args.wheelhouse,
             optimization_config=args.optimization_config,
             python_build_identity=args.python_build_identity,
+            python_build_receipt=args.python_build_receipt,
             frozen=selected_frozen,
             wheel=wheel,
             sdist=sdist,
@@ -343,7 +340,6 @@ def main() -> int:
         parser.add_argument(f"--source-receipt-{suffix}", required=True, type=Path)
         parser.add_argument(f"--source-execution-receipt-{suffix}", required=True, type=Path)
         parser.add_argument(f"--build-root-{suffix}", required=True, type=Path)
-        parser.add_argument(f"--roundtrip-root-{suffix}", required=True, type=Path)
         parser.add_argument(f"--frozen-{suffix}", required=True, type=Path)
         parser.add_argument(f"--wheel-{suffix}", required=True, type=Path)
         parser.add_argument(f"--sdist-{suffix}", required=True, type=Path)
@@ -357,6 +353,7 @@ def main() -> int:
     parser.add_argument("--binary-readme-template", required=True, type=Path)
     parser.add_argument("--source-readme-template", required=True, type=Path)
     parser.add_argument("--python-build-identity", required=True, type=Path)
+    parser.add_argument("--python-build-receipt", required=True, type=Path)
     parser.add_argument("--bootstrap-python", required=True, type=Path)
     parser.add_argument("--wheelhouse", required=True, type=Path)
     parser.add_argument("--optimization-config", required=True, type=Path)

@@ -28,6 +28,7 @@ from release_common import (
     require_release_bootstrap,
     tree_record,
     verify_artifact,
+    verify_canonical_python_release,
     verify_file,
     verify_python_build_receipt,
     verify_source_receipt,
@@ -147,9 +148,11 @@ def main() -> int:
     parser.add_argument("--wheelhouse", required=True, type=Path)
     parser.add_argument("--requirements", required=True, type=Path)
     parser.add_argument("--python-build-identity", required=True, type=Path)
+    parser.add_argument("--python-build-receipt", required=True, type=Path)
+    parser.add_argument("--canonical-wheel", required=True, type=Path)
+    parser.add_argument("--canonical-sdist", required=True, type=Path)
     parser.add_argument("--config", required=True, type=Path)
     parser.add_argument("--build-root", required=True, type=Path)
-    parser.add_argument("--roundtrip-root", required=True, type=Path)
     parser.add_argument("--receipt", required=True, type=Path)
     args = parser.parse_args()
     if sys.platform != "win32" or platform.machine().casefold() not in {"amd64", "x86_64"}:
@@ -197,6 +200,17 @@ def main() -> int:
         identity["inputs"]["canonical_python_build_identity"],
         label="canonical Python build identity",
     )
+    python_build_receipt = args.python_build_receipt.resolve(strict=True)
+    canonical_wheel = args.canonical_wheel.resolve(strict=True)
+    canonical_sdist = args.canonical_sdist.resolve(strict=True)
+    canonical_contract = verify_canonical_python_release(
+        identity,
+        source_root=running_source_root,
+        python_build_identity=python_build_identity,
+        python_build_receipt=python_build_receipt,
+        wheel=canonical_wheel,
+        sdist=canonical_sdist,
+    )
     config = args.config.resolve(strict=True)
     verify_file(config, identity["inputs"]["optimization_config"], label="selected optimization config")
     config_value = read_json(config)
@@ -207,15 +221,6 @@ def main() -> int:
     if root.exists() or root.is_symlink():
         raise ReleaseError(f"fresh build root exists: {root}")
     root.mkdir(parents=True)
-    roundtrip_root = args.roundtrip_root.absolute()
-    if roundtrip_root.exists() or roundtrip_root.is_symlink():
-        raise ReleaseError(f"fresh sdist roundtrip root exists: {roundtrip_root}")
-    if (
-        roundtrip_root == root
-        or roundtrip_root in root.parents
-        or root in roundtrip_root.parents
-    ):
-        raise ReleaseError("build and sdist roundtrip roots are equal or nested")
     environment = actual_environment(identity, root, bootstrap, wheelhouse)
     source = root / "source"
     copy_tree_exact(payload, source)
@@ -330,68 +335,13 @@ def main() -> int:
     )
     tools = query_tools(venv_python, cwd=source, environment=environment)
     artifacts = root / "artifacts"
-    canonical_workspace = root / "canonical-python-workspace"
-    canonical_receipt = root / "canonical-python-build-receipt.json"
-    canonical_builder = source / "packaging/build_canonical_python_artifacts.py"
-    execute(
-        [
-            str(venv_python),
-            str(canonical_builder),
-            "--identity",
-            str(python_build_identity),
-            "--source-checkout",
-            str(source),
-            "--wheelhouse",
-            str(wheelhouse),
-            "--requirements",
-            "packaging/windows/build-requirements.lock.txt",
-            "--workspace",
-            str(canonical_workspace),
-            "--roundtrip-workspace",
-            str(roundtrip_root),
-            "--output-dir",
-            str(artifacts),
-            "--receipt",
-            str(canonical_receipt),
-        ],
-        [
-            "<BUILD-PYTHON>",
-            "packaging/build_canonical_python_artifacts.py",
-            "--identity",
-            "<CANONICAL-PYTHON-BUILD-IDENTITY>",
-            "--source-checkout",
-            "<MATERIALIZED-SOURCE>",
-            "--wheelhouse",
-            "<WHEELHOUSE>",
-            "--requirements",
-            "packaging/windows/build-requirements.lock.txt",
-            "--workspace",
-            "<FRESH-BUILD-ROOT>/canonical-python-workspace",
-            "--roundtrip-workspace",
-            "<SDIST-ROUNDTRIP-ROOT>",
-            "--output-dir",
-            "<FRESH-BUILD-ROOT>/artifacts",
-            "--receipt",
-            "<FRESH-BUILD-ROOT>/canonical-python-build-receipt.json",
-        ],
-        cwd=root,
-        logical_cwd="<FRESH-BUILD-ROOT>",
-    )
+    artifacts.mkdir()
     wheel = artifacts / identity["artifacts"]["wheel"]["filename"]
     sdist = artifacts / identity["artifacts"]["sdist"]["filename"]
-    if not wheel.is_file() or not sdist.is_file() or len(list(artifacts.iterdir())) != 2:
-        raise ReleaseError("Python build did not produce exactly canonical wheel and sdist names")
-    canonical_receipt_value = read_json(canonical_receipt)
-    if (
-        not isinstance(canonical_receipt_value, dict)
-        or canonical_receipt_value.get("schema") != "kazstem-canonical-python-build-receipt-v1"
-        or canonical_receipt_value.get("pass") is not True
-        or canonical_receipt_value.get("release") != identity["release"]
-        or canonical_receipt_value.get("source_commit") != identity["source_commit"]
-        or canonical_receipt_value.get("source_tree") != identity["source_tree"]
-        or canonical_receipt_value.get("roundtrip", {}).get("wheel_and_sdist_identical") is not True
-    ):
-        raise ReleaseError("shared canonical Python build receipt is incomplete")
+    shutil.copyfile(canonical_wheel, wheel)
+    shutil.copyfile(canonical_sdist, sdist)
+    verify_artifact(wheel, identity["artifacts"]["wheel"], label="consumed canonical wheel")
+    verify_artifact(sdist, identity["artifacts"]["sdist"], label="consumed canonical sdist")
     audit_json = root / "python-artifact-source-audit.json"
     audit_arguments = [
         "--source", str(source), "--wheel", str(wheel), "--sdist", str(sdist),
@@ -489,7 +439,7 @@ def main() -> int:
     if source_after != source_before:
         raise ReleaseError("materialized source copy changed during the build")
     receipt = {
-        "schema": "kazstem-windows-python-freezer-build-v1",
+        "schema": "kazstem-windows-python-freezer-build-v2",
         "result": "pass",
         "label": args.label,
         "source": {
@@ -502,18 +452,24 @@ def main() -> int:
         "source_receipt": identity["inputs"]["source_receipt"],
         "source_boundary": boundary,
         "root_identity": {"logical_label": args.label, "st_dev": root.stat().st_dev, "st_ino": root.stat().st_ino},
-        "roundtrip_root_identity": {
-            "logical_label": f"{args.label}-sdist-roundtrip",
-            "st_dev": roundtrip_root.stat().st_dev,
-            "st_ino": roundtrip_root.stat().st_ino,
+        "canonical_python_validation": {
+            "identity_schema": "kazstem-canonical-python-build-identity-v2",
+            "receipt_schema": "kazstem-canonical-python-build-receipt-v2",
+            "execution_platform": canonical_contract["receipt"]["execution_platform"],
+            "linux_roundtrip_wheel_and_sdist_identical": canonical_contract[
+                "receipt"
+            ]["roundtrip"]["wheel_and_sdist_identical"],
+            "validated_by": identity["inputs"]["canonical_python_builder"],
+            "windows_rebuild_performed": False,
         },
         "build_inputs": {
             "bootstrap_python": identity["inputs"]["bootstrap_python"],
             "wheelhouse_tree": identity["inputs"]["build_wheelhouse_tree"],
+            "canonical_python_builder": identity["inputs"]["canonical_python_builder"],
             "canonical_python_build_identity": identity["inputs"]["canonical_python_build_identity"],
+            "canonical_python_build_receipt": identity["inputs"]["canonical_python_build_receipt"],
             "optimization_config": identity["inputs"]["optimization_config"],
             "requirements": file_record(requirements),
-            "canonical_builder": file_record(canonical_builder),
             "release_support_files": identity["inputs"]["release_support_files"],
         },
         "source_tree_snapshots": {"before": source_before, "after": source_after},
@@ -536,23 +492,21 @@ def main() -> int:
             "wheel": artifact_record(wheel, identity["artifacts"]["wheel"]["url"]),
             "sdist": artifact_record(sdist, identity["artifacts"]["sdist"]["url"]),
             "base_ledger": file_record(ledger),
-            "canonical_build_receipt": file_record(canonical_receipt),
         },
         "coverage": {
-            "assertions": 11,
+            "assertions": 10,
             "cases": 1,
             "checks": [
                 "base-ledger",
-                "canonical-sdist",
+                "canonical-artifacts-consumed",
+                "canonical-linux-sdist-roundtrip-receipt",
+                "canonical-v2-identity-receipt",
                 "fresh-root",
                 "frozen-tree",
                 "hash-locked-build-environment",
                 "no-network-runtime-modules",
                 "python-artifact-source-parity",
-                "sdist-to-wheel-roundtrip",
-                "sdist-byte-identity",
                 "source-tree-unchanged",
-                "wheel-byte-identity",
             ],
         },
     }
@@ -570,18 +524,18 @@ def main() -> int:
         identity,
         label=args.label,
         build_root=root,
-        roundtrip_root=roundtrip_root,
         bootstrap_python=bootstrap,
         wheelhouse=wheelhouse,
         optimization_config=config,
         python_build_identity=python_build_identity,
+        python_build_receipt=python_build_receipt,
         frozen=frozen,
         wheel=wheel,
         sdist=sdist,
         base_ledger=ledger,
     )
     summary = {
-        "schema": "kazstem-windows-python-freezer-build-summary-v1",
+        "schema": "kazstem-windows-python-freezer-build-summary-v2",
         "result": "pass",
         "mode": args.mode,
         "label": args.label,

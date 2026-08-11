@@ -5,6 +5,11 @@ name: Validate Windows final-release tooling (no publish)
 # have been frozen; this workflow cannot create tags, releases, or packages.
 on:
   workflow_dispatch:
+    inputs:
+      source_commit:
+        description: Full reviewed commit SHA to validate on windows-2022
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -19,7 +24,7 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
-          ref: ${{ github.sha }}
+          ref: ${{ inputs.source_commit }}
 
       - name: Select the pinned release Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
@@ -32,17 +37,53 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $true
           New-Item -ItemType Directory -Path (Join-Path $env:RUNNER_TEMP 'kazstem-final-contract') | Out-Null
-          $pycache = Join-Path $env:RUNNER_TEMP 'kazstem-final-contract-pycache'
-          python -B -X "pycache_prefix=$pycache" -m unittest tests.test_windows_final_release_tooling -v 2>&1 |
-            Tee-Object -FilePath (Join-Path $env:RUNNER_TEMP 'kazstem-final-contract/source-contract-tests.txt')
+          $expected = '${{ inputs.source_commit }}'
+          if ($expected -notmatch '^[0-9a-f]{40}$') { throw 'source_commit must be a full lowercase SHA-1' }
+          $head = git rev-parse HEAD
+          if ($head -ne $expected) { throw "checkout differs: expected=$expected observed=$head" }
+          Get-ChildItem Env: | Where-Object {
+            $_.Name -eq 'PYTHONPATH' -or $_.Name -eq 'GLIBC_TUNABLES' -or
+            $_.Name.StartsWith('GIT_') -or $_.Name.StartsWith('LD_') -or
+            $_.Name.StartsWith('DYLD_')
+          } | ForEach-Object { Remove-Item -LiteralPath "Env:$($_.Name)" }
+          $focusedPycache = Join-Path $env:RUNNER_TEMP 'kazstem-final-focused-pycache'
+          $focused = @'
+          import sys
+          import unittest
+          sys.path.insert(0, 'src')
+          suite = unittest.defaultTestLoader.loadTestsFromNames([
+              'tests.test_backend',
+              'tests.test_guesser',
+              'tests.test_windows_final_release_tooling',
+              'tests.test_canonical_python_builder',
+              'tests.test_process_supervisor',
+          ])
+          result = unittest.TextTestRunner(verbosity=2).run(suite)
+          raise SystemExit(0 if result.wasSuccessful() else 1)
+          '@
+          $focused | python -I -B -X "pycache_prefix=$focusedPycache" - 2>&1 |
+            Tee-Object -FilePath (Join-Path $env:RUNNER_TEMP 'kazstem-final-contract/focused-tests.txt')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $fullPycache = Join-Path $env:RUNNER_TEMP 'kazstem-final-full-pycache'
+          $full = @'
+          import sys
+          import unittest
+          sys.path.insert(0, 'src')
+          suite = unittest.defaultTestLoader.discover('tests', pattern='test_*.py', top_level_dir='.')
+          result = unittest.TextTestRunner(verbosity=1).run(suite)
+          raise SystemExit(0 if result.wasSuccessful() else 1)
+          '@
+          $full | python -I -B -X "pycache_prefix=$fullPycache" - 2>&1 |
+            Tee-Object -FilePath (Join-Path $env:RUNNER_TEMP 'kazstem-final-contract/full-tests.txt')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $forbiddenBytecode = Get-ChildItem -LiteralPath . -Recurse -Force |
             Where-Object { $_.Name -eq '__pycache__' -or $_.Extension -in @('.pyc', '.pyo', '.pyd') }
           if ($forbiddenBytecode) {
             throw "source-side contract run created or retained forbidden adjacent bytecode"
           }
-          $head = git rev-parse HEAD
           $tree = git rev-parse 'HEAD^{tree}'
+          $focusedHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $env:RUNNER_TEMP 'kazstem-final-contract/focused-tests.txt')).Hash.ToLowerInvariant()
+          $fullHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $env:RUNNER_TEMP 'kazstem-final-contract/full-tests.txt')).Hash.ToLowerInvariant()
           [ordered]@{
             schema = 'kazstem-windows-final-workflow-draft-v1'
             result = 'pass'
@@ -52,6 +93,8 @@ jobs:
             runner_arch = $env:RUNNER_ARCH
             image_os = $env:ImageOS
             image_version = $env:ImageVersion
+            focused_log_sha256 = $focusedHash
+            full_log_sha256 = $fullHash
             publishing_performed = $false
             note = 'Contract tests only; no release identity or asset was frozen.'
           } | ConvertTo-Json | Out-File `

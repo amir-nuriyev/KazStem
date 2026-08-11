@@ -117,19 +117,18 @@ wheelhouse is tree-hashed, copied into corresponding source, and installed
 with `--no-index`, an exact `--find-links`, `--require-hashes`, binary-only,
 and no-dependency resolution. The CPython executable is bound by its complete
 file hash and AMD64 PE32+ identity. The selected optimization JSON is bound by
-its exact bytes. Canonical wheel and sdist generation is delegated to the
-shared checked `packaging/build_canonical_python_artifacts.py` implementation;
-there is no Windows-only sdist repacker.
+its exact bytes. Windows does not regenerate the canonical wheel or sdist. It
+loads the exact checked `packaging/build_canonical_python_artifacts.py`
+validator, verifies the v2 identity and Linux execution receipt, and copies
+that exact pair into each independent freezer root.
 
 Wheel ZIP bytes depend on the compressor implementation. The canonical wheel
 and sdist therefore come from one fixed, hash-bound build environment. A
-Windows rebuild may claim byte identity only when its Python, build stack, and
-compile/runtime zlib identities exactly match that environment. Otherwise the
-receipt must report package-member and metadata parity while the freezer
-consumes the exact canonical wheel. It must never describe different
-cross-zlib compressed bytes as reproducible. In either mode, the exact
-canonical sdist is safely extracted into a third absent, non-nested root,
-adversarially retimed, rebuilt offline, and audited.
+Windows receipts explicitly state `windows_rebuild_performed=false`; they must
+never describe different cross-zlib compressed bytes as reproducible. The
+validated Linux receipt proves the independent, adversarially retimed sdist
+roundtrip and exact wheel/sdist equality. Windows evidence separately proves
+two independent PyInstaller builds consumed those exact artifact bytes.
 
 Optimization is measured on the downloadable result. Each distinct PyInstaller
 configuration is assembled twice by `assemble_optimization_candidate.py` in

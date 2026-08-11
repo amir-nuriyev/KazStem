@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify two independent wheel/sdist/PyInstaller builds and emit evidence."""
+"""Verify two independent PyInstaller builds consuming one canonical v2 pair."""
 
 from __future__ import annotations
 
@@ -36,9 +36,9 @@ def main() -> int:
     parser.add_argument("--wheelhouse", required=True, type=Path)
     parser.add_argument("--optimization-config", required=True, type=Path)
     parser.add_argument("--python-build-identity", required=True, type=Path)
+    parser.add_argument("--python-build-receipt", required=True, type=Path)
     for suffix in ("a", "b"):
         parser.add_argument(f"--build-root-{suffix}", required=True, type=Path)
-        parser.add_argument(f"--roundtrip-root-{suffix}", required=True, type=Path)
         parser.add_argument(f"--receipt-{suffix}", required=True, type=Path)
         parser.add_argument(f"--frozen-{suffix}", required=True, type=Path)
         parser.add_argument(f"--wheel-{suffix}", required=True, type=Path)
@@ -52,15 +52,6 @@ def main() -> int:
     roots = [args.build_root_a.resolve(strict=True), args.build_root_b.resolve(strict=True)]
     if roots[0] == roots[1] or roots[0] in roots[1].parents or roots[1] in roots[0].parents or roots[0].samefile(roots[1]):
         raise ReleaseError("Python reproducibility roots are equal/nested/aliased")
-    roundtrip_roots = [
-        args.roundtrip_root_a.resolve(strict=True),
-        args.roundtrip_root_b.resolve(strict=True),
-    ]
-    all_roots = [*roots, *roundtrip_roots]
-    for first_index, first in enumerate(all_roots):
-        for second in all_roots[first_index + 1 :]:
-            if first == second or first in second.parents or second in first.parents or first.samefile(second):
-                raise ReleaseError("build and sdist-roundtrip roots are equal/nested/aliased")
     receipts = [args.receipt_a.resolve(strict=True), args.receipt_b.resolve(strict=True)]
     frozen = [args.frozen_a.resolve(strict=True), args.frozen_b.resolve(strict=True)]
     wheels = [args.wheel_a.resolve(strict=True), args.wheel_b.resolve(strict=True)]
@@ -75,11 +66,11 @@ def main() -> int:
             identity,
             label=label,
             build_root=roots[index],
-            roundtrip_root=roundtrip_roots[index],
             bootstrap_python=args.bootstrap_python,
             wheelhouse=args.wheelhouse,
             optimization_config=args.optimization_config,
             python_build_identity=args.python_build_identity,
+            python_build_receipt=args.python_build_receipt,
             frozen=frozen[index],
             wheel=wheels[index],
             sdist=sdists[index],
@@ -111,12 +102,12 @@ def main() -> int:
         "<OPTIMIZATION-CONFIG>",
         "--python-build-identity",
         "<CANONICAL-PYTHON-BUILD-IDENTITY>",
+        "--python-build-receipt",
+        "<CANONICAL-PYTHON-BUILD-RECEIPT>",
         "--build-root-a",
         "<BUILD-ROOT-A>",
         "--receipt-a",
         "<BUILD-RECEIPT-A>",
-        "--roundtrip-root-a",
-        "<ROUNDTRIP-ROOT-A>",
         "--frozen-a",
         "<FROZEN-A>",
         "--wheel-a",
@@ -129,8 +120,6 @@ def main() -> int:
         "<BUILD-ROOT-B>",
         "--receipt-b",
         "<BUILD-RECEIPT-B>",
-        "--roundtrip-root-b",
-        "<ROUNDTRIP-ROOT-B>",
         "--frozen-b",
         "<FROZEN-B>",
         "--wheel-b",
@@ -155,8 +144,8 @@ def main() -> int:
         "base_ledger": file_record(ledgers[0]),
         "root_proof": {
             "build_labels": ["a", "b"],
-            "roundtrip_labels": ["a-sdist-roundtrip", "b-sdist-roundtrip"],
             "distinct_nonnested_nonaliased": True,
+            "canonical_linux_roundtrip_receipt_validated": True,
         },
     }
     result = evidence_envelope(
@@ -169,7 +158,7 @@ def main() -> int:
         raise ReleaseError(f"Python reproducibility evidence exists: {args.json}")
     args.json.parent.mkdir(parents=True, exist_ok=True)
     args.json.write_bytes(json_bytes(result))
-    print("PASS: two independent Python/freezer builds are byte-identical")
+    print("PASS: two independent Windows freezers consumed one validated v2 pair")
     return 0
 
 

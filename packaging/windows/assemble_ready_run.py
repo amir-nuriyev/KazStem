@@ -213,7 +213,7 @@ def assemble(args: argparse.Namespace) -> dict[str, Any]:
     (verification / "BUILD-IDENTITY.json").write_bytes(
         json_bytes(
             {
-                "schema": "kazstem-windows-build-identity-v1",
+                "schema": "kazstem-windows-build-identity-v2",
                 "release": identity["release"],
                 "source_commit": identity["source_commit"],
                 "source_date_epoch": identity["source_date_epoch"],
@@ -222,6 +222,13 @@ def assemble(args: argparse.Namespace) -> dict[str, Any]:
                     "wheel": artifacts["wheel"],
                     "sdist": artifacts["sdist"],
                 },
+                "canonical_python_builder": expected["canonical_python_builder"],
+                "canonical_python_build_identity": expected[
+                    "canonical_python_build_identity"
+                ],
+                "canonical_python_build_receipt": expected[
+                    "canonical_python_build_receipt"
+                ],
                 "resource_bundle": expected["resource_tree"],
                 "runtime_bundle": expected["runtime_tree"],
                 "platform_lock": expected["platform_lock"],

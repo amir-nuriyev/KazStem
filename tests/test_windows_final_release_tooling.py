@@ -175,7 +175,9 @@ def identity() -> dict[str, object]:
                 "regular_file_bytes": 1,
                 "sha256": "1" * 64,
             },
+            "canonical_python_builder": file_identity("6"),
             "canonical_python_build_identity": file_identity("7"),
+            "canonical_python_build_receipt": file_identity("8"),
             "optimization_config": file_identity("2"),
             "platform_lock": file_identity("a"),
             "base_ledger": file_identity("b"),
@@ -1348,16 +1350,102 @@ class WindowsReleaseCommonTests(unittest.TestCase):
             path.write_text(json.dumps(identity()), encoding="utf-8")
             self.assertEqual(common.load_identity(path)["release"], "0.2.3")
 
-    def test_python_build_receipt_rejects_network_missing_roundtrip_and_changed_inputs(self) -> None:
+    def test_windows_adapter_validates_exact_v2_receipt_without_rebuilding(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "source"
+            dist = root / "dist"
+            source.mkdir()
+            dist.mkdir()
+            python_identity = root / "identity.json"
+            python_receipt = root / "receipt.json"
+            python_identity.write_bytes(b"{}\n")
+            python_receipt.write_bytes(b"{}\n")
+            wheel = dist / "kazstem-0.2.3-py3-none-any.whl"
+            sdist = dist / "kazstem-0.2.3.tar.gz"
+            wheel.write_bytes(b"wheel")
+            sdist.write_bytes(b"sdist")
+            value = identity()
+            release_base = "https://github.com/amir-nuriyev/KazStem/releases/download/v0.2.3/"
+            value["artifacts"]["wheel"] = common.artifact_record(
+                wheel, release_base + wheel.name
+            )
+            value["artifacts"]["sdist"] = common.artifact_record(
+                sdist, release_base + sdist.name
+            )
+            value["inputs"]["canonical_python_build_identity"] = common.file_record(
+                python_identity
+            )
+            value["inputs"]["canonical_python_build_receipt"] = common.file_record(
+                python_receipt
+            )
+            canonical_identity = {
+                name: value[name]
+                for name in (
+                    "release",
+                    "source_commit",
+                    "source_tree",
+                    "source_origin",
+                    "source_ref",
+                    "source_date_epoch",
+                )
+            }
+            canonical_identity["artifacts"] = {
+                name: {
+                    "filename": value["artifacts"][name]["filename"],
+                    "bytes": value["artifacts"][name]["bytes"],
+                    "sha256": value["artifacts"][name]["sha256"],
+                }
+                for name in ("wheel", "sdist")
+            }
+            canonical_identity["canonicalizer"] = {
+                "path": "packaging/build_canonical_python_artifacts.py",
+                "file": value["inputs"]["canonical_python_builder"],
+            }
+            validator = types.SimpleNamespace(
+                load_identity=mock.Mock(return_value=canonical_identity),
+                validate_receipt=mock.Mock(return_value={"pass": True}),
+            )
+            with mock.patch.object(
+                common, "_load_canonical_python_builder", return_value=validator
+            ):
+                observed = common.verify_canonical_python_release(
+                    value,
+                    source_root=source,
+                    python_build_identity=python_identity,
+                    python_build_receipt=python_receipt,
+                    wheel=wheel,
+                    sdist=sdist,
+                )
+            self.assertEqual(
+                observed["receipt_file"],
+                value["inputs"]["canonical_python_build_receipt"],
+            )
+            validator.validate_receipt.assert_called_once_with(
+                {}, identity=canonical_identity, output_dir=dist
+            )
+            canonical_identity["source_commit"] = "0" * 40
+            with mock.patch.object(
+                common, "_load_canonical_python_builder", return_value=validator
+            ), self.assertRaisesRegex(common.ReleaseError, "release source"):
+                common.verify_canonical_python_release(
+                    value,
+                    source_root=source,
+                    python_build_identity=python_identity,
+                    python_build_receipt=python_receipt,
+                    wheel=wheel,
+                    sdist=sdist,
+                )
+
+    def test_python_build_receipt_consumes_v2_pair_and_rejects_changed_inputs(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             base = Path(temporary)
             build_root = base / "build"
-            roundtrip_root = base / "roundtrip"
             frozen = build_root / "dist/kazstem"
             artifacts = build_root / "artifacts"
             source_packaging = build_root / "source/packaging/windows"
             shared_packaging = build_root / "source/packaging"
-            for path in (frozen, artifacts, source_packaging, roundtrip_root):
+            for path in (frozen, artifacts, source_packaging):
                 path.mkdir(parents=True, exist_ok=True)
             (frozen / "payload.bin").write_bytes(b"frozen")
             wheel = artifacts / "kazstem-0.2.3-py3-none-any.whl"
@@ -1370,7 +1458,7 @@ class WindowsReleaseCommonTests(unittest.TestCase):
             requirements.write_bytes(b"build==1 --hash=sha256:" + b"0" * 64 + b"\n")
             canonical_builder = shared_packaging / "build_canonical_python_artifacts.py"
             canonical_builder.write_bytes(b"# fixture\n")
-            canonical_receipt = build_root / "canonical-python-build-receipt.json"
+            canonical_receipt = base / "canonical-python-build-receipt.json"
             canonical_receipt.write_bytes(b"{}\n")
             bootstrap = base / "python.exe"
             write_amd64_pe(bootstrap)
@@ -1398,7 +1486,7 @@ class WindowsReleaseCommonTests(unittest.TestCase):
                 )
             )
             python_identity = base / "python-build-identity.json"
-            python_identity.write_bytes(b'{"schema":"kazstem-canonical-python-build-identity-v1"}\n')
+            python_identity.write_bytes(b'{"schema":"kazstem-canonical-python-build-identity-v2"}\n')
 
             value = identity()
             for support in value["inputs"]["release_support_files"]:
@@ -1411,6 +1499,8 @@ class WindowsReleaseCommonTests(unittest.TestCase):
             value["inputs"]["build_wheelhouse_tree"] = common.tree_record(wheelhouse)
             value["inputs"]["optimization_config"] = common.file_record(config)
             value["inputs"]["canonical_python_build_identity"] = common.file_record(python_identity)
+            value["inputs"]["canonical_python_build_receipt"] = common.file_record(canonical_receipt)
+            value["inputs"]["canonical_python_builder"] = common.file_record(canonical_builder)
             value["inputs"]["frozen_tree"] = common.tree_record(frozen)
             value["inputs"]["base_ledger"] = common.file_record(ledger)
             value["artifacts"]["wheel"] = common.artifact_record(wheel, release_base + wheel.name)
@@ -1447,7 +1537,7 @@ class WindowsReleaseCommonTests(unittest.TestCase):
             )
             build_source_boundary.pop("bootstrap")
             receipt = {
-                "schema": "kazstem-windows-python-freezer-build-v1",
+                "schema": "kazstem-windows-python-freezer-build-v2",
                 "result": "pass",
                 "label": "a",
                 "source": {
@@ -1464,18 +1554,22 @@ class WindowsReleaseCommonTests(unittest.TestCase):
                     "st_dev": build_root.stat().st_dev,
                     "st_ino": build_root.stat().st_ino,
                 },
-                "roundtrip_root_identity": {
-                    "logical_label": "a-sdist-roundtrip",
-                    "st_dev": roundtrip_root.stat().st_dev,
-                    "st_ino": roundtrip_root.stat().st_ino,
+                "canonical_python_validation": {
+                    "identity_schema": "kazstem-canonical-python-build-identity-v2",
+                    "receipt_schema": "kazstem-canonical-python-build-receipt-v2",
+                    "execution_platform": {"system": "linux", "machine": "x86_64"},
+                    "linux_roundtrip_wheel_and_sdist_identical": True,
+                    "validated_by": value["inputs"]["canonical_python_builder"],
+                    "windows_rebuild_performed": False,
                 },
                 "build_inputs": {
                     "bootstrap_python": value["inputs"]["bootstrap_python"],
                     "wheelhouse_tree": value["inputs"]["build_wheelhouse_tree"],
+                    "canonical_python_builder": value["inputs"]["canonical_python_builder"],
                     "canonical_python_build_identity": value["inputs"]["canonical_python_build_identity"],
+                    "canonical_python_build_receipt": value["inputs"]["canonical_python_build_receipt"],
                     "optimization_config": value["inputs"]["optimization_config"],
                     "requirements": common.file_record(requirements),
-                    "canonical_builder": common.file_record(canonical_builder),
                     "release_support_files": value["inputs"]["release_support_files"],
                 },
                 "source_tree_snapshots": {
@@ -1509,16 +1603,16 @@ class WindowsReleaseCommonTests(unittest.TestCase):
                     "wheel": value["artifacts"]["wheel"],
                     "sdist": value["artifacts"]["sdist"],
                     "base_ledger": common.file_record(ledger),
-                    "canonical_build_receipt": common.file_record(canonical_receipt),
                 },
                 "coverage": {
-                    "assertions": 11,
+                    "assertions": 10,
                     "cases": 1,
                     "checks": [
-                        "base-ledger", "canonical-sdist", "fresh-root", "frozen-tree",
+                        "base-ledger", "canonical-artifacts-consumed",
+                        "canonical-linux-sdist-roundtrip-receipt",
+                        "canonical-v2-identity-receipt", "fresh-root", "frozen-tree",
                         "hash-locked-build-environment", "no-network-runtime-modules",
-                        "python-artifact-source-parity", "sdist-to-wheel-roundtrip",
-                        "sdist-byte-identity", "source-tree-unchanged", "wheel-byte-identity",
+                        "python-artifact-source-parity", "source-tree-unchanged",
                     ],
                 },
             }
@@ -1527,37 +1621,55 @@ class WindowsReleaseCommonTests(unittest.TestCase):
                 identity=value,
                 label="a",
                 build_root=build_root,
-                roundtrip_root=roundtrip_root,
                 bootstrap_python=bootstrap,
                 wheelhouse=wheelhouse,
                 optimization_config=config,
                 python_build_identity=python_identity,
+                python_build_receipt=canonical_receipt,
                 frozen=frozen,
                 wheel=wheel,
                 sdist=sdist,
                 base_ledger=ledger,
             )
-            common.verify_python_build_receipt(receipt, **arguments)
+            canonical_contract = {
+                "receipt": {
+                    "execution_platform": {"system": "linux", "machine": "x86_64"},
+                    "roundtrip": {"wheel_and_sdist_identical": True},
+                }
+            }
+            with mock.patch.object(
+                common,
+                "verify_canonical_python_release",
+                return_value=canonical_contract,
+            ):
+                common.verify_python_build_receipt(receipt, **arguments)
 
             network_eligible = json.loads(json.dumps(receipt))
             network_eligible["execution"]["commands"][1]["argv"].remove("--no-index")
-            with self.assertRaises(common.ReleaseError):
+            with mock.patch.object(
+                common,
+                "verify_canonical_python_release",
+                return_value=canonical_contract,
+            ), self.assertRaises(common.ReleaseError):
                 common.verify_python_build_receipt(network_eligible, **arguments)
-            with self.assertRaises((common.ReleaseError, OSError)):
-                common.verify_python_build_receipt(
-                    receipt,
-                    **{**arguments, "roundtrip_root": base / "missing-roundtrip"},
-                )
             changed_config = base / "changed-config.json"
             changed_config.write_bytes(config.read_bytes() + b" ")
-            with self.assertRaises(common.ReleaseError):
+            with mock.patch.object(
+                common,
+                "verify_canonical_python_release",
+                return_value=canonical_contract,
+            ), self.assertRaises(common.ReleaseError):
                 common.verify_python_build_receipt(
                     receipt,
                     **{**arguments, "optimization_config": changed_config},
                 )
             changed_bootstrap = base / "changed-python.exe"
             changed_bootstrap.write_bytes(bootstrap.read_bytes() + b"changed")
-            with self.assertRaises(common.ReleaseError):
+            with mock.patch.object(
+                common,
+                "verify_canonical_python_release",
+                return_value=canonical_contract,
+            ), self.assertRaises(common.ReleaseError):
                 common.verify_python_build_receipt(
                     receipt,
                     **{**arguments, "bootstrap_python": changed_bootstrap},

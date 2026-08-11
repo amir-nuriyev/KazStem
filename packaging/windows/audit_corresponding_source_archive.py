@@ -40,6 +40,7 @@ from release_common import (
     tree_record,
     tree_inventory,
     verify_artifact,
+    verify_canonical_python_release,
     verify_checksums,
     verify_file,
     verify_generator_runtime,
@@ -446,6 +447,21 @@ def audit(args: argparse.Namespace) -> dict[str, Any]:
             if copied_license.read_bytes() != (application / relative).read_bytes():
                 raise ReleaseError(f"copied application license differs: {relative}")
         closure = read_json(root / "SOURCE-CLOSURE.json")
+        canonical = root / categories["build"] / "canonical-python-artifacts"
+        embedded_python_identity = (
+            root / categories["build"] / "canonical-python-build-identity.json"
+        )
+        embedded_python_receipt = (
+            root / categories["build"] / "canonical-python-build-receipt.json"
+        )
+        canonical_contract = verify_canonical_python_release(
+            identity,
+            source_root=application,
+            python_build_identity=embedded_python_identity,
+            python_build_receipt=embedded_python_receipt,
+            wheel=canonical / identity["artifacts"]["wheel"]["filename"],
+            sdist=canonical / identity["artifacts"]["sdist"]["filename"],
+        )
         expected_components = [
             {
                 "name": value["name"],
@@ -470,6 +486,15 @@ def audit(args: argparse.Namespace) -> dict[str, Any]:
             "canonical_python_build_identity": {
                 "path": f"{categories['build']}/canonical-python-build-identity.json",
                 "file": identity["inputs"]["canonical_python_build_identity"],
+            },
+            "canonical_python_build_receipt": {
+                "path": f"{categories['build']}/canonical-python-build-receipt.json",
+                "file": identity["inputs"]["canonical_python_build_receipt"],
+                "schema": "kazstem-canonical-python-build-receipt-v2",
+                "execution_platform": canonical_contract["receipt"]["execution_platform"],
+                "linux_roundtrip_wheel_and_sdist_identical": canonical_contract[
+                    "receipt"
+                ]["roundtrip"]["wheel_and_sdist_identical"],
             },
             "components": expected_components,
             "offline_freezer_wheelhouse": {
@@ -501,11 +526,15 @@ def audit(args: argparse.Namespace) -> dict[str, Any]:
             label="extracted offline freezer wheelhouse",
         )
 
-        canonical = root / categories["build"] / "canonical-python-artifacts"
         verify_file(
-            root / categories["build"] / "canonical-python-build-identity.json",
+            embedded_python_identity,
             identity["inputs"]["canonical_python_build_identity"],
             label="source canonical Python build identity",
+        )
+        verify_file(
+            embedded_python_receipt,
+            identity["inputs"]["canonical_python_build_receipt"],
+            label="source canonical Python build receipt",
         )
         for name in ("wheel", "sdist"):
             verify_artifact(canonical / identity["artifacts"][name]["filename"], identity["artifacts"][name], label=f"source {name}")

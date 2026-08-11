@@ -24,6 +24,7 @@ from release_common import (
     require_release_bootstrap,
     source_ready_location,
     verify_artifact,
+    verify_canonical_python_release,
     verify_file,
     verify_or_observe_output,
     verify_required_paths,
@@ -69,6 +70,15 @@ def assemble(args: argparse.Namespace) -> dict[str, object]:
         python_build_identity,
         inputs["canonical_python_build_identity"],
         label="canonical Python build identity",
+    )
+    python_build_receipt = args.python_build_receipt.resolve(strict=True)
+    canonical_contract = verify_canonical_python_release(
+        identity,
+        source_root=payload,
+        python_build_identity=python_build_identity,
+        python_build_receipt=python_build_receipt,
+        wheel=args.wheel,
+        sdist=args.sdist,
     )
     source_receipt = args.source_receipt.resolve(strict=True)
     verify_file(source_receipt, inputs["source_receipt"], label="Git source materialization receipt")
@@ -142,6 +152,8 @@ def assemble(args: argparse.Namespace) -> dict[str, object]:
         verify_file(target, {"bytes": record["bytes"], "sha256": record["sha256"]}, label=f"copied {path.name}")
     build_identity_target = root / categories["build"] / "canonical-python-build-identity.json"
     shutil.copyfile(python_build_identity, build_identity_target)
+    build_receipt_target = root / categories["build"] / "canonical-python-build-receipt.json"
+    shutil.copyfile(python_build_receipt, build_receipt_target)
 
     (root / source_contract["source_commit_file"]).parent.mkdir(parents=True, exist_ok=True)
     (root / source_contract["source_commit_file"]).write_text(identity["source_commit"] + "\n", encoding="ascii", newline="\n")
@@ -173,6 +185,15 @@ def assemble(args: argparse.Namespace) -> dict[str, object]:
                 "canonical_python_build_identity": {
                     "path": f"{categories['build']}/canonical-python-build-identity.json",
                     "file": inputs["canonical_python_build_identity"],
+                },
+                "canonical_python_build_receipt": {
+                    "path": f"{categories['build']}/canonical-python-build-receipt.json",
+                    "file": inputs["canonical_python_build_receipt"],
+                    "schema": "kazstem-canonical-python-build-receipt-v2",
+                    "execution_platform": canonical_contract["receipt"]["execution_platform"],
+                    "linux_roundtrip_wheel_and_sdist_identical": canonical_contract[
+                        "receipt"
+                    ]["roundtrip"]["wheel_and_sdist_identical"],
                 },
                 "components": copied_components,
                 "offline_freezer_wheelhouse": {
@@ -253,6 +274,7 @@ def main() -> int:
     parser.add_argument("--wheel", required=True, type=Path)
     parser.add_argument("--sdist", required=True, type=Path)
     parser.add_argument("--python-build-identity", required=True, type=Path)
+    parser.add_argument("--python-build-receipt", required=True, type=Path)
     parser.add_argument("--work-root", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--observation", type=Path)

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -136,7 +137,7 @@ REQUIRED_EVIDENCE_GATES = {
     "host-identity": "kazstem-windows-final-host-v1",
     "optimization": "kazstem-windows-optimization-selection-v1",
     "process-cleanup": "kazstem-windows-process-cleanup-gate-v1",
-    "python-artifact-reproducibility": "kazstem-windows-python-artifact-reproducibility-v1",
+    "python-artifact-reproducibility": "kazstem-windows-python-artifact-reproducibility-v2",
     "runtime-provenance": "kazstem-windows-runtime-provenance-gate-v1",
     "source-archive-audit": SOURCE_AUDIT_SCHEMA,
     "source-suite": "kazstem-windows-source-suite-v1",
@@ -244,12 +245,11 @@ def canonical_generator_entrypoint_argv(
             "--wheelhouse", "<WHEELHOUSE>",
             "--optimization-config", "<OPTIMIZATION-CONFIG>",
             "--python-build-identity", "<CANONICAL-PYTHON-BUILD-IDENTITY>",
+            "--python-build-receipt", "<CANONICAL-PYTHON-BUILD-RECEIPT>",
             "--build-root-a", "<BUILD-ROOT-A>", "--receipt-a", "<BUILD-RECEIPT-A>",
-            "--roundtrip-root-a", "<ROUNDTRIP-ROOT-A>",
             "--frozen-a", "<FROZEN-A>", "--wheel-a", "<WHEEL-A>",
             "--sdist-a", "<SDIST-A>", "--ledger-a", "<LEDGER-A>",
             "--build-root-b", "<BUILD-ROOT-B>", "--receipt-b", "<BUILD-RECEIPT-B>",
-            "--roundtrip-root-b", "<ROUNDTRIP-ROOT-B>",
             "--frozen-b", "<FROZEN-B>", "--wheel-b", "<WHEEL-B>",
             "--sdist-b", "<SDIST-B>", "--ledger-b", "<LEDGER-B>",
             "--json", "<EVIDENCE-OUTPUT>",
@@ -871,7 +871,9 @@ def load_identity(path: Path) -> dict[str, Any]:
             "source_receipt",
             "bootstrap_python",
             "build_wheelhouse_tree",
+            "canonical_python_builder",
             "canonical_python_build_identity",
+            "canonical_python_build_receipt",
             "optimization_config",
             "platform_lock",
             "base_ledger",
@@ -891,9 +893,14 @@ def load_identity(path: Path) -> dict[str, Any]:
         expected_name="python.exe",
     )
     _tree(inputs["build_wheelhouse_tree"], "inputs.build_wheelhouse_tree")
+    _file(inputs["canonical_python_builder"], "inputs.canonical_python_builder")
     _file(
         inputs["canonical_python_build_identity"],
         "inputs.canonical_python_build_identity",
+    )
+    _file(
+        inputs["canonical_python_build_receipt"],
+        "inputs.canonical_python_build_receipt",
     )
     _file(inputs["optimization_config"], "inputs.optimization_config")
     support_files = inputs["release_support_files"]
@@ -1256,7 +1263,9 @@ def release_subject(identity: dict[str, Any]) -> dict[str, Any]:
         "platform_lock": identity["inputs"]["platform_lock"],
         "bootstrap_python": identity["inputs"]["bootstrap_python"],
         "build_wheelhouse_tree": identity["inputs"]["build_wheelhouse_tree"],
+        "canonical_python_builder": identity["inputs"]["canonical_python_builder"],
         "canonical_python_build_identity": identity["inputs"]["canonical_python_build_identity"],
+        "canonical_python_build_receipt": identity["inputs"]["canonical_python_build_receipt"],
         "optimization_config": identity["inputs"]["optimization_config"],
         "release_support_files": identity["inputs"]["release_support_files"],
         "optimization": identity["optimization"],
@@ -1786,6 +1795,107 @@ def verify_source_execution_receipt(
         raise ReleaseError("source execution receipt coverage is incomplete")
 
 
+def _load_canonical_python_builder(
+    source_root: Path, expected_file: dict[str, Any]
+) -> Any:
+    """Load the exact adjacent shared validator from the inventoried source."""
+
+    builder = source_root.resolve(strict=True) / "packaging/build_canonical_python_artifacts.py"
+    verify_file(builder, expected_file, label="shared canonical Python validator")
+    spec = importlib.util.spec_from_file_location(
+        "_kazstem_windows_canonical_python_validator", builder
+    )
+    if spec is None or spec.loader is None:
+        raise ReleaseError("cannot load shared canonical Python validator")
+    module = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(module)
+    except Exception as exc:
+        raise ReleaseError(f"cannot execute shared canonical Python validator: {exc}") from exc
+    return module
+
+
+def verify_canonical_python_release(
+    identity: dict[str, Any],
+    *,
+    source_root: Path,
+    python_build_identity: Path,
+    python_build_receipt: Path,
+    wheel: Path,
+    sdist: Path,
+) -> dict[str, Any]:
+    """Validate the one official Linux-built pair without rebuilding it on Windows."""
+
+    inputs = identity["inputs"]
+    identity_path = python_build_identity.resolve(strict=True)
+    receipt_path = python_build_receipt.resolve(strict=True)
+    wheel_path = wheel.resolve(strict=True)
+    sdist_path = sdist.resolve(strict=True)
+    verify_file(
+        identity_path,
+        inputs["canonical_python_build_identity"],
+        label="canonical Python v2 build identity",
+    )
+    verify_file(
+        receipt_path,
+        inputs["canonical_python_build_receipt"],
+        label="canonical Python v2 build receipt",
+    )
+    if wheel_path.parent != sdist_path.parent:
+        raise ReleaseError("canonical wheel and sdist must share one exact output directory")
+    verify_artifact(wheel_path, identity["artifacts"]["wheel"], label="canonical wheel")
+    verify_artifact(sdist_path, identity["artifacts"]["sdist"], label="canonical sdist")
+    module = _load_canonical_python_builder(
+        source_root, inputs["canonical_python_builder"]
+    )
+    try:
+        canonical_identity = module.load_identity(identity_path)
+    except Exception as exc:
+        raise ReleaseError(f"canonical Python v2 identity is invalid: {exc}") from exc
+    expected_source = {
+        "release": identity["release"],
+        "source_commit": identity["source_commit"],
+        "source_tree": identity["source_tree"],
+        "source_origin": identity["source_origin"],
+        "source_ref": identity["source_ref"],
+        "source_date_epoch": identity["source_date_epoch"],
+    }
+    if {name: canonical_identity.get(name) for name in expected_source} != expected_source:
+        raise ReleaseError("canonical Python identity differs from the Windows release source")
+    expected_artifacts = {
+        name: {
+            "filename": identity["artifacts"][name]["filename"],
+            "bytes": identity["artifacts"][name]["bytes"],
+            "sha256": identity["artifacts"][name]["sha256"],
+        }
+        for name in ("wheel", "sdist")
+    }
+    if canonical_identity.get("artifacts") != expected_artifacts:
+        raise ReleaseError("canonical Python identity artifact bytes differ")
+    if canonical_identity.get("canonicalizer") != {
+        "path": "packaging/build_canonical_python_artifacts.py",
+        "file": inputs["canonical_python_builder"],
+    }:
+        raise ReleaseError("canonical Python identity is not bound to the checked validator")
+    receipt_value = read_json(receipt_path)
+    try:
+        module.validate_receipt(
+            receipt_value,
+            identity=canonical_identity,
+            output_dir=wheel_path.parent,
+        )
+    except Exception as exc:
+        raise ReleaseError(f"canonical Python v2 receipt validation failed: {exc}") from exc
+    return {
+        "identity": canonical_identity,
+        "receipt": receipt_value,
+        "identity_file": inputs["canonical_python_build_identity"],
+        "receipt_file": inputs["canonical_python_build_receipt"],
+        "builder_file": inputs["canonical_python_builder"],
+        "artifacts": expected_artifacts,
+    }
+
+
 def python_build_commands(identity: dict[str, Any], *, noarchive: bool) -> list[dict[str, Any]]:
     def command(
         argv: list[str],
@@ -1816,20 +1926,6 @@ def python_build_commands(identity: dict[str, Any], *, noarchive: bool) -> list[
                 "packaging/windows/build-requirements.lock.txt",
             ],
             "<MATERIALIZED-SOURCE>",
-        ),
-        command(
-            [
-                "<BUILD-PYTHON>", "packaging/build_canonical_python_artifacts.py",
-                "--identity", "<CANONICAL-PYTHON-BUILD-IDENTITY>",
-                "--source-checkout", "<MATERIALIZED-SOURCE>",
-                "--wheelhouse", "<WHEELHOUSE>",
-                "--requirements", "packaging/windows/build-requirements.lock.txt",
-                "--workspace", "<FRESH-BUILD-ROOT>/canonical-python-workspace",
-                "--roundtrip-workspace", "<SDIST-ROUNDTRIP-ROOT>",
-                "--output-dir", "<FRESH-BUILD-ROOT>/artifacts",
-                "--receipt", "<FRESH-BUILD-ROOT>/canonical-python-build-receipt.json",
-            ],
-            "<FRESH-BUILD-ROOT>",
         ),
         command(
             source_tool(
@@ -1877,11 +1973,11 @@ def verify_python_build_receipt(
     *,
     label: str,
     build_root: Path,
-    roundtrip_root: Path,
     bootstrap_python: Path,
     wheelhouse: Path,
     optimization_config: Path,
     python_build_identity: Path,
+    python_build_receipt: Path,
     frozen: Path,
     wheel: Path,
     sdist: Path,
@@ -1897,7 +1993,7 @@ def verify_python_build_receipt(
             "source_receipt",
             "source_boundary",
             "root_identity",
-            "roundtrip_root_identity",
+            "canonical_python_validation",
             "build_inputs",
             "source_tree_snapshots",
             "execution",
@@ -1907,7 +2003,7 @@ def verify_python_build_receipt(
         "Python/freezer build receipt",
     )
     if (
-        receipt["schema"] != "kazstem-windows-python-freezer-build-v1"
+        receipt["schema"] != "kazstem-windows-python-freezer-build-v2"
         or receipt["result"] != "pass"
         or receipt["label"] != label
     ):
@@ -1936,25 +2032,11 @@ def verify_python_build_receipt(
         "st_ino": root_stat.st_ino,
     }:
         raise ReleaseError("build receipt does not bind the actual fresh root object")
-    resolved_roundtrip = roundtrip_root.resolve(strict=True)
-    roundtrip_stat = resolved_roundtrip.stat()
-    if (
-        resolved_roundtrip == resolved_root
-        or resolved_roundtrip in resolved_root.parents
-        or resolved_root in resolved_roundtrip.parents
-        or resolved_roundtrip.samefile(resolved_root)
-        or receipt["roundtrip_root_identity"]
-        != {
-            "logical_label": f"{label}-sdist-roundtrip",
-            "st_dev": roundtrip_stat.st_dev,
-            "st_ino": roundtrip_stat.st_ino,
-        }
-    ):
-        raise ReleaseError("sdist roundtrip root is not distinct/exactly receipted")
     bootstrap_path = bootstrap_python.resolve(strict=True)
     wheelhouse_path = wheelhouse.resolve(strict=True)
     config_path = optimization_config.resolve(strict=True)
     python_identity_path = python_build_identity.resolve(strict=True)
+    python_receipt_path = python_build_receipt.resolve(strict=True)
     if pe_identity(bootstrap_path) != identity["inputs"]["bootstrap_python"]:
         raise ReleaseError("build receipt bootstrap Python bytes/architecture differ")
     verify_tree(
@@ -1980,15 +2062,41 @@ def verify_python_build_receipt(
         identity["inputs"]["canonical_python_build_identity"],
         label="build receipt canonical Python identity",
     )
+    verify_file(
+        python_receipt_path,
+        identity["inputs"]["canonical_python_build_receipt"],
+        label="build receipt canonical Python v2 receipt",
+    )
+    canonical_contract = verify_canonical_python_release(
+        identity,
+        source_root=resolved_root / "source",
+        python_build_identity=python_identity_path,
+        python_build_receipt=python_receipt_path,
+        wheel=wheel,
+        sdist=sdist,
+    )
+    canonical_receipt_value = canonical_contract["receipt"]
+    expected_canonical_validation = {
+        "identity_schema": "kazstem-canonical-python-build-identity-v2",
+        "receipt_schema": "kazstem-canonical-python-build-receipt-v2",
+        "execution_platform": canonical_receipt_value["execution_platform"],
+        "linux_roundtrip_wheel_and_sdist_identical": canonical_receipt_value[
+            "roundtrip"
+        ]["wheel_and_sdist_identical"],
+        "validated_by": identity["inputs"]["canonical_python_builder"],
+        "windows_rebuild_performed": False,
+    }
+    if receipt["canonical_python_validation"] != expected_canonical_validation:
+        raise ReleaseError("Windows freezer receipt overstates canonical Python production")
     requirements_path = resolved_root / "source/packaging/windows/build-requirements.lock.txt"
-    canonical_builder_path = resolved_root / "source/packaging/build_canonical_python_artifacts.py"
     if receipt["build_inputs"] != {
         "bootstrap_python": identity["inputs"]["bootstrap_python"],
         "wheelhouse_tree": identity["inputs"]["build_wheelhouse_tree"],
+        "canonical_python_builder": identity["inputs"]["canonical_python_builder"],
         "canonical_python_build_identity": identity["inputs"]["canonical_python_build_identity"],
+        "canonical_python_build_receipt": identity["inputs"]["canonical_python_build_receipt"],
         "optimization_config": identity["inputs"]["optimization_config"],
         "requirements": file_record(requirements_path),
-        "canonical_builder": file_record(canonical_builder_path),
         "release_support_files": identity["inputs"]["release_support_files"],
     }:
         raise ReleaseError("build receipt inputs differ from strict release identity")
@@ -2017,7 +2125,7 @@ def verify_python_build_receipt(
             raise ReleaseError(f"{name} output is not inside its receipt build root") from exc
     outputs = _exact(
         receipt["outputs"],
-        {"frozen_tree", "wheel", "sdist", "base_ledger", "canonical_build_receipt"},
+        {"frozen_tree", "wheel", "sdist", "base_ledger"},
         "build receipt outputs",
     )
     if outputs != {
@@ -2025,9 +2133,6 @@ def verify_python_build_receipt(
         "wheel": artifact_record(wheel, identity["artifacts"]["wheel"]["url"]),
         "sdist": artifact_record(sdist, identity["artifacts"]["sdist"]["url"]),
         "base_ledger": file_record(base_ledger),
-        "canonical_build_receipt": file_record(
-            resolved_root / "canonical-python-build-receipt.json"
-        ),
     }:
         raise ReleaseError("build receipt output identities differ from actual bytes")
     execution = _exact(
@@ -2086,16 +2191,15 @@ def verify_python_build_receipt(
     coverage = _exact(receipt["coverage"], {"assertions", "cases", "checks"}, "build receipt coverage")
     required_checks = [
         "base-ledger",
-        "canonical-sdist",
+        "canonical-artifacts-consumed",
+        "canonical-linux-sdist-roundtrip-receipt",
+        "canonical-v2-identity-receipt",
         "fresh-root",
         "frozen-tree",
         "hash-locked-build-environment",
         "no-network-runtime-modules",
         "python-artifact-source-parity",
-        "sdist-to-wheel-roundtrip",
-        "sdist-byte-identity",
         "source-tree-unchanged",
-        "wheel-byte-identity",
     ]
     if (
         coverage.get("assertions") != len(required_checks)
@@ -2135,14 +2239,10 @@ def python_build_receipt_projection(value: dict[str, Any]) -> dict[str, Any]:
     return {
         key: item
         for key, item in value.items()
-        if key not in {"root_identity", "roundtrip_root_identity"}
+        if key != "root_identity"
     } | {
         "root_identity": {
             "logical_label": value["root_identity"]["logical_label"],
-            "distinct_nonnested_nonaliased": True,
-        },
-        "roundtrip_root_identity": {
-            "logical_label": value["roundtrip_root_identity"]["logical_label"],
             "distinct_nonnested_nonaliased": True,
         },
     }
@@ -3188,7 +3288,11 @@ def validate_evidence_observations(
             or observations["sdist"] != identity["artifacts"]["sdist"]
             or observations["frozen_tree"] != identity["inputs"]["frozen_tree"]
             or observations["base_ledger"] != identity["inputs"]["base_ledger"]
-            or observations["root_proof"].get("distinct_nonnested_nonaliased") is not True
+            or observations["root_proof"] != {
+                "build_labels": ["a", "b"],
+                "distinct_nonnested_nonaliased": True,
+                "canonical_linux_roundtrip_receipt_validated": True,
+            }
             or len(observations["build_receipts"]) != 2
         ):
             raise ReleaseError("Python artifact reproducibility observations differ")

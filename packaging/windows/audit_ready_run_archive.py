@@ -164,7 +164,19 @@ def audit(args: argparse.Namespace) -> dict[str, Any]:
         verify_checksums(root, root / "verification/BUNDLED-FILES.sha256")
 
         build_identity = read_json(root / "verification/BUILD-IDENTITY.json")
-        if not isinstance(build_identity, dict) or build_identity.get("source_commit") != identity["source_commit"] or build_identity.get("canonical_python_artifacts") != {"wheel": identity["artifacts"]["wheel"], "sdist": identity["artifacts"]["sdist"]}:
+        if (
+            not isinstance(build_identity, dict)
+            or build_identity.get("schema") != "kazstem-windows-build-identity-v2"
+            or build_identity.get("source_commit") != identity["source_commit"]
+            or build_identity.get("canonical_python_artifacts")
+            != {"wheel": identity["artifacts"]["wheel"], "sdist": identity["artifacts"]["sdist"]}
+            or build_identity.get("canonical_python_builder")
+            != identity["inputs"]["canonical_python_builder"]
+            or build_identity.get("canonical_python_build_identity")
+            != identity["inputs"]["canonical_python_build_identity"]
+            or build_identity.get("canonical_python_build_receipt")
+            != identity["inputs"]["canonical_python_build_receipt"]
+        ):
             raise ReleaseError("embedded build identity differs from release identity")
         binding = read_json(root / "CORRESPONDING-SOURCE.json")
         if not isinstance(binding, dict) or binding.get("artifact") != identity["artifacts"]["corresponding_source"]:
