@@ -37,6 +37,8 @@ downloaded wheel bytes are not pinned. Models and venvs live persistently under
 the checkout's `.qazmorph/` directory; installer caches are ephemeral. Model
 weights and dependency wheels are not redistributed by this repository.
 
-MyStem is not a dependency. Its public documentation and published 2003 paper
-inform interface/algorithm comparison only. The MyStem binary is not downloaded,
-run, inspected, decompiled, disassembled, or redistributed.
+MyStem is not a dependency and is not redistributed. Its public documentation
+and published 2003 paper inform interface/algorithm comparison. Yandex's
+official Linux 3.1 binary was downloaded and executed only as a black box for
+the fixed serializer-envelope probes recorded in `docs/MYSTEM_COMPATIBILITY.md`;
+it was not decompiled, disassembled, modified, or incorporated.

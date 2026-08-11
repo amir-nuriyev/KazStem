@@ -9,7 +9,39 @@ include CITATION.cff
 include CITATION.bib
 include codemeta.json
 include .zenodo.json
+include .gitattributes
 recursive-include benchmarks *.md
 recursive-include docs *.md
+recursive-include packaging *.json *.md *.py *.spec *.txt
+recursive-include packaging/resource-producer *
+include packaging/linux/BINARY-README.template.md
+include packaging/CANONICAL-PYTHON-ARTIFACTS.md
+include packaging/build_canonical_python_artifacts.py
+include packaging/process_supervisor.py
+include packaging/python-build-requirements.lock
+include packaging/linux/python-freezer-requirements.lock
+include packaging/linux/build_frozen_from_wheel.py
+include packaging/linux/frozen_wheel_entrypoint.py
+include packaging/linux/kazstem-minimal.spec
+include packaging/cpython-BUILD.txt
+include packaging/cpython-LICENSE
+include packaging/linux/CORRESPONDING-SOURCE-README.template.md
+include packaging/linux/RELEASE-IDENTITY.md
+include packaging/linux/assemble_corresponding_source.py
+include packaging/linux/assemble_ready_run.py
+include packaging/linux/audit_corresponding_source_archive.py
+include packaging/linux/audit_ready_run_archive.py
+include packaging/linux/benchmark_compat_linux.py
+include packaging/linux/finalize_release.py
+include packaging/linux/generate_compression_comparison.py
+include packaging/linux/generate_gate_evidence.py
+include packaging/linux/generate_optimization_ledger.py
+include packaging/linux/normalize_runtime_provenance.py
+include packaging/linux/release_common.py
+include packaging/linux/run_network_workload.py
+include packaging/linux/run_no_network.py
+include packaging/linux/run_source_suite.py
+include packaging/linux/verify_python_reproducibility.py
+include packaging/linux/verify_remote_tag.py
 recursive-include scripts *.json *.py *.sh
 recursive-include tests *.py

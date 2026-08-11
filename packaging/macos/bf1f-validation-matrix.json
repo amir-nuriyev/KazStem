@@ -1,0 +1,107 @@
+{
+  "activation": {
+    "automatic": false,
+    "candidate_lock_is_release_input": false,
+    "required_reviewed_change": "replace only the Darwin runtime resource_bundle_ids value after every required native gate passes",
+    "source_lock_must_remain_f03_only": true
+  },
+  "audited_source": {
+    "commit": "8d51f7334132ed2513f87b0ed21e08cbc206eb66",
+    "tree": "144a946cf989da13afc729ba4b80b04620f61df4"
+  },
+  "behavior_cases": [
+    "all-five-cli-formats-mystem-flags-stdin-files-unicode-and-errors",
+    "bf1f-detached-darwin-runtime-resolves-official",
+    "bf1f-resource-manifest-v4-complete-inventory-and-producer-closure",
+    "complete-f03-release-practical-matrix",
+    "dictionary-first-irregulars-never-overridden",
+    "dictionary-generation-kitap-pl-dat-kitaptarga",
+    "persistent-and-one-shot-hfst-protocol-parity-and-cleanup",
+    "productive-boundary-uppercase-hyphen-and-loan-form-rejections",
+    "productive-directionality-canonical-instrumental-and-analysis-only-exclusions",
+    "productive-generation-new-lemma-pl-dat-and-public-analysis-roundtrip",
+    "productive-query-byte-result-record-time-and-process-caps",
+    "read-only-offline-hostile-loader-environment-and-bundle-immutability",
+    "warm-cold-startup-realistic-throughput-peak-rss-and-repeatability",
+    "wheel-module-api-and-frozen-analysis-byte-parity"
+  ],
+  "candidate": {
+    "darwin_runtime": {
+      "bundle_id": "5341c48bfd1ef57e3976d0849d0ec6d61e2d45ff8d4643b07176fbc6eddf8e57",
+      "manifest": {
+        "bytes": 10679,
+        "sha256": "bb84ef3fc227fd24c78e4b8f25caa26f365a5f9497aaa76a7ec2d5d49836ee72"
+      }
+    },
+    "resource": {
+      "bundle_id": "bf1f31ff6e5860585b9e4134f12dcfb9d6df8030ee87b368e5a5f29eb45c1188",
+      "manifest": {
+        "bytes": 18092,
+        "sha256": "8d596011020b21a903244490cc7201d348d7bcc5442ef736ec7e4ac5435083e1"
+      },
+      "manifest_schema": "qazmorph-resource-manifest-v4",
+      "producer_snapshot": "packaging/resource-producer/bf1f31ff6e5860585b9e4134f12dcfb9d6df8030ee87b368e5a5f29eb45c1188"
+    }
+  },
+  "current_release": {
+    "darwin_runtime": {
+      "bundle_id": "5341c48bfd1ef57e3976d0849d0ec6d61e2d45ff8d4643b07176fbc6eddf8e57",
+      "manifest": {
+        "bytes": 10679,
+        "sha256": "bb84ef3fc227fd24c78e4b8f25caa26f365a5f9497aaa76a7ec2d5d49836ee72"
+      }
+    },
+    "resource_bundle_ids": [
+      "f03e703d3e2a67044a7d91fd7d575b92cb4e61aa782fb67cff91b0a5ff0ebd5a"
+    ]
+  },
+  "platform": {
+    "machine": "arm64",
+    "minimum_os": "15.0",
+    "system": "darwin"
+  },
+  "required_gates": [
+    {
+      "gate": "archive-and-source-closure",
+      "requirement": "rebuild and audit ready/source archives, include the exact bf1f producer closure, and preserve the one-way source binding",
+      "tool": "packaging/macos/audit_corresponding_source_archive.py"
+    },
+    {
+      "gate": "blackbox-and-practical-behavior",
+      "requirement": "run every listed behavior case without skip and bind exact streams, counts, hashes, resource/runtime identities, cleanup, performance, and RSS",
+      "tool": "packaging/macos/practical_matrix_macos.py"
+    },
+    {
+      "gate": "candidate-wheel-and-freezer-rebuild",
+      "requirement": "rebuild the canonical wheel with only the proposed tracked lock change, then create at least two independent fresh Darwin freezer roots",
+      "tool": "packaging/macos/verify_python_reproducibility.py"
+    },
+    {
+      "gate": "final-independent-rerun",
+      "requirement": "rerun the selected candidate from fresh inputs, require byte-identical raw tars and selected containers, and recompute every evidence hash",
+      "tool": "packaging/macos/finalize_release.py"
+    },
+    {
+      "gate": "loader-and-resource-provenance",
+      "requirement": "force-rehash the complete bf1f and Darwin runtime inventories from a clean parent loader environment and require official provenance",
+      "tool": "packaging/macos/normalize_runtime_provenance.py"
+    },
+    {
+      "gate": "native-runtime-and-macho-closure",
+      "requirement": "verify the bf1f/runtime selection, thin arm64 closure, minimum OS, rpaths, whole-framework seals, ad-hoc identity, and exact detached runtime manifest",
+      "tool": "packaging/macos/audit_macho_closure.py"
+    },
+    {
+      "gate": "offline-process-coverage",
+      "requirement": "deny network access for all descendants with a working negative control and retain normalized complete trace evidence",
+      "tool": "packaging/macos/verify_offline_processes.py"
+    },
+    {
+      "gate": "producer-source-closure",
+      "requirement": "verify the exact bf1f producer snapshot plus every locked binary/source archive and emit its release_closure_identity",
+      "tool": "packaging/verify_resource_producer_snapshot.py"
+    }
+  ],
+  "schema": "kazstem-macos-bf1f-native-validation-matrix-v1",
+  "status": "blocked-pending-real-macos-native-validation"
+}

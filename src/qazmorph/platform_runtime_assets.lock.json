@@ -1,0 +1,48 @@
+{
+  "runtimes": [
+    {
+      "bundle_id": "5341c48bfd1ef57e3976d0849d0ec6d61e2d45ff8d4643b07176fbc6eddf8e57",
+      "manifest": {
+        "bytes": 10679,
+        "sha256": "bb84ef3fc227fd24c78e4b8f25caa26f365a5f9497aaa76a7ec2d5d49836ee72"
+      },
+      "platform": {
+        "machine": "arm64",
+        "system": "darwin"
+      },
+      "resource_bundle_ids": [
+        "f03e703d3e2a67044a7d91fd7d575b92cb4e61aa782fb67cff91b0a5ff0ebd5a"
+      ]
+    },
+    {
+      "bundle_id": "39a01ea673d024b0d6080739b5bb23c76daf0f7ed7bdb95dd1157d9dce4b627e",
+      "manifest": {
+        "bytes": 9958,
+        "sha256": "67da829d117d39d7de34afbc67dd649be24156fa9fab613aa318b438b9637f4b"
+      },
+      "platform": {
+        "machine": "x86_64",
+        "system": "linux"
+      },
+      "resource_bundle_ids": [
+        "bf1f31ff6e5860585b9e4134f12dcfb9d6df8030ee87b368e5a5f29eb45c1188",
+        "f03e703d3e2a67044a7d91fd7d575b92cb4e61aa782fb67cff91b0a5ff0ebd5a"
+      ]
+    },
+    {
+      "bundle_id": "17a69ae11ff3fd92a555e8c95571223cbe8b217ec409a0b9b368f0aed90ee465",
+      "manifest": {
+        "bytes": 20697,
+        "sha256": "554a776a942e2db65ca34bb6e05e0c258976848203cbece38ababc0067d1ee46"
+      },
+      "platform": {
+        "machine": "x86_64",
+        "system": "windows"
+      },
+      "resource_bundle_ids": [
+        "f03e703d3e2a67044a7d91fd7d575b92cb4e61aa782fb67cff91b0a5ff0ebd5a"
+      ]
+    }
+  ],
+  "schema": "kazstem-platform-runtime-lock-v1"
+}

@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections import OrderedDict
 import json
 import re
-from xml.sax.saxutils import escape, quoteattr
 
 from .types import Analysis, AnalysisSpan, Document, Token
 
@@ -15,6 +14,33 @@ class XMLFormatError(ValueError):
 
 
 _XML_ENCODING_NAME = re.compile(r"[A-Za-z][A-Za-z0-9._-]*\Z")
+
+
+def _escape_xml_text(value: str) -> str:
+    """Match ``xml.sax.saxutils.escape`` without importing its URL stack."""
+
+    # Ampersand must be escaped first so replacement entities stay intact.
+    return (
+        value.replace("&", "&amp;")
+        .replace(">", "&gt;")
+        .replace("<", "&lt;")
+    )
+
+
+def _quote_xml_attribute(value: str) -> str:
+    """Match ``xml.sax.saxutils.quoteattr`` for the fixed entity set."""
+
+    escaped = _escape_xml_text(value)
+    escaped = (
+        escaped.replace("\n", "&#10;")
+        .replace("\r", "&#13;")
+        .replace("\t", "&#9;")
+    )
+    if '"' in escaped:
+        if "'" in escaped:
+            return f'"{escaped.replace(chr(34), "&quot;")}"'
+        return f"'{escaped}'"
+    return f'"{escaped}"'
 
 
 def _validate_xml_10(value: str, *, field: str) -> str:
@@ -37,11 +63,11 @@ def _validate_xml_10(value: str, *, field: str) -> str:
 
 
 def _xml_text(value: str, *, field: str) -> str:
-    return escape(_validate_xml_10(value, field=field))
+    return _escape_xml_text(_validate_xml_10(value, field=field))
 
 
 def _xml_attribute(value: object, *, field: str) -> str:
-    return quoteattr(_validate_xml_10(str(value), field=field))
+    return _quote_xml_attribute(_validate_xml_10(str(value), field=field))
 
 
 def _xml_encoding_attribute(encoding: str) -> str:
@@ -50,7 +76,7 @@ def _xml_encoding_attribute(encoding: str) -> str:
         raise XMLFormatError(
             "XML declaration encoding must match the XML EncName syntax"
         )
-    return quoteattr(encoding)
+    return _quote_xml_attribute(encoding)
 
 
 def _matches_filter(analysis: Analysis, filters: frozenset[str]) -> bool:
@@ -178,6 +204,11 @@ def format_text(
             rendered = [
                 _analysis_text(analysis, gram_info=gram_info, weights=weights) for analysis in analyses
             ]
+            # Distinct lossless FST readings can collapse to the same public
+            # MyStem lemma/grammar/weight string. Preserve the full lattice in
+            # JSONL/API output, but do not repeat indistinguishable rows in
+            # this deliberately lossy compatibility projection.
+            rendered = list(dict.fromkeys(rendered))
         body = "|".join(rendered)
         chunks.append(body if lemmas_only else f"{token.text}{{{body}}}")
         if sentence_markers and token.sentence_end:
@@ -219,21 +250,25 @@ def _mystem_analysis_json(
         groups = [[analysis] for analysis in analyses]
 
     rows: list[dict[str, object]] = []
+    seen_rows: set[tuple[tuple[str, object], ...]] = set()
     for group in groups:
         first = group[0]
         row: dict[str, object] = {"lex": first.lemma}
-        if gram_info:
-            grammars = list(dict.fromkeys(_grammar(analysis) for analysis in group))
-            row["gr"] = grammars[0] if len(grammars) == 1 else "(" + "|".join(grammars) + ")"
+        available_scores = [analysis.score for analysis in group if analysis.score is not None]
+        if weights and len(available_scores) == len(group):
+            row["wt"] = round(sum(available_scores), 8)
         if all(analysis.guessed for analysis in group):
             # ``bastard`` is MyStem's documented qualifier for a generated
             # (non-dictionary) hypothesis. The richer JSONL schema retains
             # QazMorph's clearer boolean/provenance fields.
             row["qual"] = "bastard"
-        available_scores = [analysis.score for analysis in group if analysis.score is not None]
-        if weights and len(available_scores) == len(group):
-            row["wt"] = round(sum(available_scores), 8)
-        rows.append(row)
+        if gram_info:
+            grammars = list(dict.fromkeys(_grammar(analysis) for analysis in group))
+            row["gr"] = grammars[0] if len(grammars) == 1 else "(" + "|".join(grammars) + ")"
+        key = tuple(row.items())
+        if key not in seen_rows:
+            seen_rows.add(key)
+            rows.append(row)
     return rows
 
 
@@ -270,14 +305,21 @@ def format_mystem_json(
             continue
         if dictionary_only and token.kind in {"word", "number"} and not analyses:
             continue
-        row: dict[str, object] = {"text": token.text}
         if analyses:
-            row["analysis"] = _mystem_analysis_json(
-                analyses,
-                gram_info=gram_info,
-                merge=merge,
-                weights=weights,
-            )
+            # Match MyStem's stable serialized field order. JSON consumers
+            # must not depend on object order, but keeping ``analysis`` before
+            # ``text`` makes byte-oriented compatibility fixtures useful.
+            row: dict[str, object] = {
+                "analysis": _mystem_analysis_json(
+                    analyses,
+                    gram_info=gram_info,
+                    merge=merge,
+                    weights=weights,
+                ),
+                "text": token.text,
+            }
+        else:
+            row = {"text": token.text}
         rows.append(row)
     if newline:
         return "\n".join(
@@ -414,7 +456,6 @@ def format_xml(
         if dictionary_only and not analyses:
             continue
         chunks.append("<w>")
-        chunks.append(_xml_text(token.text, field="token text"))
         for row in _mystem_analysis_json(
             analyses,
             gram_info=gram_info,
@@ -422,15 +463,19 @@ def format_xml(
             weights=weights,
         ):
             attrs = [f"lex={_xml_attribute(row['lex'], field='analysis lex')}"]
+            if "wt" in row:
+                attrs.append(f"wt={_xml_attribute(row['wt'], field='analysis wt')}")
             if "qual" in row:
                 attrs.append(
                     f"qual={_xml_attribute(row['qual'], field='analysis qual')}"
                 )
             if "gr" in row:
                 attrs.append(f"gr={_xml_attribute(row['gr'], field='analysis gr')}")
-            if "wt" in row:
-                attrs.append(f"wt={_xml_attribute(row['wt'], field='analysis wt')}")
             chunks.append("<ana " + " ".join(attrs) + " />")
+        # MyStem emits all zero-width analysis elements before the surface
+        # text in ``w``. This ordering is observable in XML's mixed-content
+        # model, so it is part of the compatibility shape.
+        chunks.append(_xml_text(token.text, field="token text"))
         chunks.append("</w>")
         if sentence_markers and token.sentence_end and index < last_emitted_lexical:
             chunks.append("</se><se>")

@@ -1,0 +1,423 @@
+{
+  "build": {
+    "inputs": {
+      "scripts/bootstrap_h100.sh": {
+        "bytes": 7078,
+        "sha256": "e74dae32b5aee7b7bc44317f382d0b06347f7300be1595746a18dba33e31f568"
+      },
+      "scripts/build_resources.sh": {
+        "bytes": 20400,
+        "sha256": "d37102fa8f7aa477d0c214f99423c0f184371e9277404bd43077ceda6712f530"
+      },
+      "scripts/generator_regression_probes.json": {
+        "bytes": 975,
+        "sha256": "2e3626ee4c8a7ad2a1c59e9b024214311557ef1d7eb79f0c3548afa42eab341e"
+      },
+      "scripts/guesser_regression_probes.json": {
+        "bytes": 14805,
+        "sha256": "23d1cb198d6b44eb5ea4f4a58699dc2cc6e198c22291f0095b4e0652ebbcdd0c"
+      },
+      "scripts/toolchain_assets.lock.json": {
+        "bytes": 2120,
+        "sha256": "73284682e37b367606d31ccf6307bd298435ea0ab4d37906eeb677cfb9ec7744"
+      },
+      "scripts/verify_generator_fst.py": {
+        "bytes": 43438,
+        "sha256": "4c9da53ccfeaa5a61f072f7ead4454db85502f6c082dc98f292d2f5751f64f5c"
+      },
+      "scripts/verify_guesser_fst.py": {
+        "bytes": 26565,
+        "sha256": "ee8d61d0a3a4d3ef21984304793d35b9b148188a1b036ec82a81fd137b3c049d"
+      },
+      "scripts/write_manifest.py": {
+        "bytes": 24363,
+        "sha256": "bea386493cfab17cae43beae63dc38327f17b584e1aee351aa62c2c080c827a2"
+      },
+      "scripts/write_toolchain_manifest.py": {
+        "bytes": 13715,
+        "sha256": "6348ef9360d2cc52ef3e5a1a03ad6ab8372ef77e8e128d428ad146420461653f"
+      },
+      "src/qazmorph/generator.py": {
+        "bytes": 20856,
+        "sha256": "e62db9f0a3d006d5c5c62bf798906996eecb0b35a0b401ff3b3804d5861d6d82"
+      },
+      "src/qazmorph/guesser.py": {
+        "bytes": 43389,
+        "sha256": "062cdb879fa1d6656a8f1099ffc537b77e0f4363f5c03a3a1621ab74a2d39a41"
+      }
+    },
+    "locale": "C.UTF-8",
+    "python_hash_seed": 0,
+    "source_date_epoch": 1698868329,
+    "timezone": "UTC",
+    "toolchain": {
+      "bundle_id": "6cbd944616faf0bdef8e742eb57cc61ba55a8d643bc3df00f2cc66b542129899",
+      "manifest": {
+        "bytes": 48887,
+        "sha256": "d39a1c6af7e6abd866cfa386c67c256c95b089cf67f5ffd5bb66c7b0cf2d9791"
+      },
+      "version": "ubuntu-noble-hfst-cg3-6cbd944616faf0bd"
+    },
+    "verification": {
+      "generator_subset_of_analyzer": {
+        "commands": [
+          "hfst-subtract",
+          "hfst-fst2strings"
+        ],
+        "operation": "generation_relation - analysis_relation",
+        "required_result": "empty language"
+      },
+      "productive_generator_finite_valued": {
+        "commands": [
+          "hfst-disjunct",
+          "hfst-fst2fst",
+          "hfst-fst2strings",
+          "hfst-fst2txt",
+          "hfst-invert",
+          "hfst-lookup",
+          "hfst-optimized-lookup",
+          "hfst-subtract"
+        ],
+        "direction_probes": "scripts/generator_regression_probes.json",
+        "operation": "invert the Dir/LR-free finite productive analyzer; prove it is a strict subset of the full analyzer; reject every generator-orientation input-epsilon cycle; prove exact inverse equality, every installed optimized relation, immutable direction probes, and combined generated-pair analyzer acceptance",
+        "probes": "scripts/guesser_regression_probes.json",
+        "report": {
+          "bytes": 6572,
+          "sha256": "2bee65cce79e2d75645779b9a811c5cfbb844062600bc1a103861dbbf0140d63"
+        },
+        "required_result": "finite-valued exact inverse of the generation-safe subset; standard and installed optimized relations equal; every required pair present; no forbidden loan or Dir/LR pair; dictionary plus productive generation is a subset of installed accepted analysis",
+        "result": {
+          "combined_generation_subset": {
+            "dictionary_and_productive_generator_subset_of_analyzers": true,
+            "generated_minus_accepted_empty": true,
+            "operation": "(installed_dictionary_generator | installed_productive_generator) - (inverse(installed_dictionary_analyzer) | inverse(installed_productive_analyzer)) = empty"
+          },
+          "definition": "finite-valued productive generator: no input-epsilon cycle is reachable in lexical-to-surface orientation; its complete relation is the exact inverse of the productive analyzer, survives optimized serialization, inverts every required probe pair, excludes every forbidden pair, and adds no generated pair outside the union of the compiled and productive analyzers",
+          "directionality_probes": {
+            "analysis_only_adjective_comparative_excluded": true,
+            "analysis_only_verb_future_plan_excluded": true,
+            "canonical_short_instrumental_only": true,
+            "forbidden_pairs": [
+              {
+                "query": "тосынет<v><iv><fut_plan><p3><sg>",
+                "surface": "тосынетпекші"
+              },
+              {
+                "query": "тосынсапа<adj><comp>",
+                "surface": "тосынсапалау"
+              },
+              {
+                "query": "тосынтүбір<n><ins>",
+                "surface": "тосынтүбірменен"
+              }
+            ],
+            "forbidden_pairs_checked": 3,
+            "forbidden_pairs_found": [],
+            "forbidden_pairs_observed": 0,
+            "queries": 3,
+            "required_pairs": [
+              {
+                "query": "тосынет<v><iv><fut_plan><p3><sg>",
+                "surface": "тосынетпек"
+              },
+              {
+                "query": "тосынсапа<adj><comp>",
+                "surface": "тосынсапарақ"
+              },
+              {
+                "query": "тосынтүбір<n><ins>",
+                "surface": "тосынтүбірмен"
+              }
+            ],
+            "required_pairs_checked": 3,
+            "required_pairs_missing": []
+          },
+          "generation_direction_relation": {
+            "analysis_only_counterexample_present": true,
+            "full_minus_generation_safe_nonempty": true,
+            "generation_safe_analyzer_subset_of_full_analyzer": true,
+            "generation_safe_minus_full_empty": true,
+            "operation": "generation_safe - full = empty and full - generation_safe is non-empty"
+          },
+          "graph": {
+            "arcs": 86865,
+            "final_states": 206,
+            "finite_valued_per_finite_lexical_input": true,
+            "input_epsilon_arcs": 1200,
+            "orientation": "lexical_analysis_to_surface",
+            "reachable_input_epsilon_cycle": false,
+            "reachable_states": 4102,
+            "states": 4102
+          },
+          "inputs": {
+            "baseline_probes": {
+              "bytes": 14805,
+              "sha256": "23d1cb198d6b44eb5ea4f4a58699dc2cc6e198c22291f0095b4e0652ebbcdd0c"
+            },
+            "dictionary_analyzer_lexical_to_surface_standard": {
+              "bytes": 1983991,
+              "sha256": "fe5c6ae74d1ccd9e1ab9d50de143c2afd326a57d44a012970446f2e7e9e2cb78"
+            },
+            "dictionary_analyzer_surface_to_lexical_optimized": {
+              "bytes": 1634211,
+              "sha256": "23d9f6d19c19ce7817db521d557a4ea235802732769c181cfb41f98f4933d565"
+            },
+            "dictionary_generator_optimized": {
+              "bytes": 1674699,
+              "sha256": "034e6f21848698096762e64e40045cfb0182c23f2a62aae326065d8916cb14f0"
+            },
+            "dictionary_generator_standard": {
+              "bytes": 1950393,
+              "sha256": "9821152c1c302240fbac9e35485af4f49fde8674aa91c1ebb4d26a27bcd2df6e"
+            },
+            "direction_probes": {
+              "bytes": 975,
+              "sha256": "2e3626ee4c8a7ad2a1c59e9b024214311557ef1d7eb79f0c3548afa42eab341e"
+            },
+            "full_productive_analyzer_optimized": {
+              "bytes": 1269001,
+              "sha256": "925090165140627cd77d2447b696f786a622f08561c393e9101f69aef3ed52a6"
+            },
+            "full_productive_analyzer_standard": {
+              "bytes": 1501918,
+              "sha256": "b37d0909ed6d24e65660ed0a21efa8c08faad4c8500ba88782f8775a524dd932"
+            },
+            "generation_safe_productive_analyzer_standard": {
+              "bytes": 1441414,
+              "sha256": "2207a9f8e60d1303ddf7e3286b72d9150e8c68514f21e02cc74dace196be7817"
+            },
+            "productive_generator_optimized": {
+              "bytes": 1938389,
+              "sha256": "dbe966e46ba876aa6b6dcb4346554b46f00e663679af470e0564eb7e43720b49"
+            },
+            "productive_generator_standard": {
+              "bytes": 1443613,
+              "sha256": "ba05d990732c98e5350cd4c92c5ca6a690d24512c649852ed30eacca13e76e29"
+            }
+          },
+          "installed_artifacts": {
+            "all_installed_relations_equivalent_to_standard": true,
+            "dictionary_analyzer_surface_to_lexical": {
+              "full_relation_equivalent_to_standard": true,
+              "operation": "standard - optimized_roundtrip = empty and optimized_roundtrip - standard = empty",
+              "optimized_roundtrip_minus_standard_empty": true,
+              "standard_minus_optimized_roundtrip_empty": true
+            },
+            "dictionary_generator": {
+              "full_relation_equivalent_to_standard": true,
+              "operation": "standard - optimized_roundtrip = empty and optimized_roundtrip - standard = empty",
+              "optimized_roundtrip_minus_standard_empty": true,
+              "standard_minus_optimized_roundtrip_empty": true
+            },
+            "full_productive_analyzer": {
+              "full_relation_equivalent_to_standard": true,
+              "operation": "standard - optimized_roundtrip = empty and optimized_roundtrip - standard = empty",
+              "optimized_roundtrip_minus_standard_empty": true,
+              "standard_minus_optimized_roundtrip_empty": true
+            }
+          },
+          "inverse_relation": {
+            "generator_inverse_equals_productive_analyzer": true,
+            "generator_inverse_minus_productive_analyzer_empty": true,
+            "operation": "productive_analyzer - inverse(productive_generator) = empty and inverse(productive_generator) - productive_analyzer = empty",
+            "productive_analyzer_minus_generator_inverse_empty": true
+          },
+          "inversion_probes": {
+            "all_queries_keyed": true,
+            "cap_markers": 0,
+            "cycle_markers": 0,
+            "forbidden_pairs_checked": 10,
+            "forbidden_pairs_found": [],
+            "forbidden_pairs_observed": 0,
+            "input_epsilon_cycle_follow_limit_enabled": false,
+            "lookup_result_cap_enabled": false,
+            "maximum_distinct_candidates_per_query": 4,
+            "queries": 74,
+            "required_pairs_checked": 67,
+            "required_pairs_missing": []
+          },
+          "optimized_runtime": {
+            "candidate_sets_equal_to_standard": true,
+            "cap_markers": 0,
+            "cycle_markers": 0,
+            "full_relation_equivalent_to_standard": true,
+            "lookup_result_cap_enabled": false,
+            "operation": "standard - optimized_roundtrip = empty and optimized_roundtrip - standard = empty",
+            "optimized_roundtrip_minus_standard_empty": true,
+            "queries": 74,
+            "standard_minus_optimized_roundtrip_empty": true,
+            "standard_optimized_mismatches": []
+          },
+          "schema": "qazmorph-productive-generator-finiteness-v2"
+        },
+        "verifier": "scripts/verify_generator_fst.py"
+      },
+      "productive_guesser_finite_valued": {
+        "commands": [
+          "hfst-fst2fst",
+          "hfst-fst2strings",
+          "hfst-fst2txt",
+          "hfst-lookup",
+          "hfst-optimized-lookup",
+          "hfst-subtract"
+        ],
+        "operation": "reject every reachable input-epsilon cycle and run the immutable no-cap bounded-root and forbidden-reading probe fixture; prove the baseline relation is retained",
+        "probes": "scripts/guesser_regression_probes.json",
+        "report": {
+          "bytes": 2995,
+          "sha256": "0dd73797c4bf3d68c34a3e1fb17f877b16dbb67fbe74b4070ba404ae4a72e93e"
+        },
+        "required_result": "no reachable input-epsilon cycle, no cycle marker, every unknown lemma matches the explicit bounded root relation, no forbidden generic loan reading, baseline inclusion, and optimized serialization relation-equivalence",
+        "result": {
+          "baseline_relation": {
+            "baseline_subset_of_final": true,
+            "operation": "baseline_relation - final_relation = empty"
+          },
+          "definition": "finite-valued productive analyzer: no input-epsilon cycle is reachable from the initial state; every checked unknown lemma matches the explicit identity, stem-final, one-shot noun-syncope, or kubok-family root relation; the original productive relation remains a formal subset",
+          "graph": {
+            "arcs": 90636,
+            "final_states": 214,
+            "input_epsilon_arcs": 16997,
+            "reachable_input_epsilon_cycle": false,
+            "reachable_states": 4116,
+            "states": 4116
+          },
+          "no_cap_probes": {
+            "all_have_readings": true,
+            "all_lemmas_match_bounded_root_relation": true,
+            "bounded_root_relation": {
+              "identity_copy_nonempty_surface_prefix": true,
+              "loan_back_harmony": {
+                "consuming_surface_normalizations": [
+                  [
+                    "ы",
+                    "і"
+                  ],
+                  [
+                    "а",
+                    "е"
+                  ]
+                ],
+                "generic_back_harmony_g_to_k": false,
+                "lemma_suffix": "кубок",
+                "noun_only": true,
+                "surface_to_lemma_final_pair": [
+                  "г",
+                  "к"
+                ]
+              },
+              "noun_high_vowel_syncope": {
+                "noun_only": true,
+                "one_shot_output_only_vowels": [
+                  "ы",
+                  "і"
+                ],
+                "position": "immediately_before_final_root_consonant",
+                "requires_nonempty_surface_suffix": true
+              },
+              "one_shot_surface_to_lemma_final_pairs": [
+                [
+                  "б",
+                  "п"
+                ],
+                [
+                  "г",
+                  "к"
+                ],
+                [
+                  "ғ",
+                  "қ"
+                ]
+              ],
+              "unbounded_input_epsilon_root_templates": false
+            },
+            "cycle_markers": 0,
+            "deterministic_adversarial_probes": 256,
+            "explicit_fixture_probes": 107,
+            "forbidden_readings_checked": 7,
+            "forbidden_readings_observed": 0,
+            "maximum_distinct_readings_per_probe": 57,
+            "probes": 363,
+            "probes_by_root_kind": {
+              "identity": 363,
+              "loan_back_harmony_kubok": 5,
+              "noun_high_vowel_syncope": 20,
+              "stem_final_alternation": 10
+            },
+            "probes_with_required_readings": 58,
+            "probes_with_shorter_lemma_reading": 177,
+            "required_readings_checked": 64,
+            "required_shorter_lemma_readings": 47,
+            "root_readings": {
+              "identity": 6577,
+              "loan_back_harmony_kubok": 11,
+              "noun_high_vowel_syncope": 42,
+              "stem_final_alternation": 58
+            },
+            "total_distinct_readings": 6688,
+            "tracked_readings_checked": 7,
+            "tracked_readings_missing": [],
+            "tracked_readings_present": 7
+          },
+          "optimized_runtime": {
+            "candidate_sets_equal_to_standard": true,
+            "cycle_markers": 0,
+            "full_relation_equivalent_to_standard": true,
+            "operation": "standard - optimized_roundtrip = empty and optimized_roundtrip - standard = empty",
+            "probes": 363,
+            "total_distinct_readings": 6688
+          },
+          "schema": "qazmorph-guesser-finiteness-v2"
+        },
+        "verifier": "scripts/verify_guesser_fst.py"
+      }
+    }
+  },
+  "bundle_id": "bf1f31ff6e5860585b9e4134f12dcfb9d6df8030ee87b368e5a5f29eb45c1188",
+  "files": {
+    "kaz.autogen.hfstol": {
+      "bytes": 1674699,
+      "sha256": "034e6f21848698096762e64e40045cfb0182c23f2a62aae326065d8916cb14f0"
+    },
+    "kaz.automorf.hfstol": {
+      "bytes": 1634211,
+      "sha256": "23d9f6d19c19ce7817db521d557a4ea235802732769c181cfb41f98f4933d565"
+    },
+    "kaz.guesser.autogen.hfstol": {
+      "bytes": 1938389,
+      "sha256": "dbe966e46ba876aa6b6dcb4346554b46f00e663679af470e0564eb7e43720b49"
+    },
+    "kaz.guesser.automorf.hfstol": {
+      "bytes": 1269001,
+      "sha256": "925090165140627cd77d2447b696f786a622f08561c393e9101f69aef3ed52a6"
+    },
+    "kaz.rlx.bin": {
+      "bytes": 27022,
+      "sha256": "0553d9b9a2b85cbfa1d6ab8ab88dbf2beb965bb6da3d9296f603008de167cf81"
+    }
+  },
+  "schema": "qazmorph-resource-manifest-v4",
+  "source": {
+    "commit": "95c6dd0d8536ee69a7058634b03a3e82100b6b6e",
+    "commit_timestamp": "2023-11-01T19:52:09+00:00",
+    "inputs": {
+      "apertium-kaz.kaz.lexc": {
+        "bytes": 1899828,
+        "sha256": "ea8a0eabdbd3ba98774efec755cc39f7f9dcb72da5464d93b900700a45548771"
+      },
+      "apertium-kaz.kaz.rlx": {
+        "bytes": 40749,
+        "sha256": "62a2340fabf8ee94f804110fd1b4e3e350fdb108ff7fbff1262db0a3572c4e94"
+      },
+      "apertium-kaz.kaz.twol": {
+        "bytes": 18974,
+        "sha256": "937065dcb69adf079dca4745330871e0198e3cd8542610ebf862f367f6bddc39"
+      }
+    },
+    "license": "GPL-3.0",
+    "name": "apertium-kaz",
+    "tree": "8f8996c85a4081263a4eaf190f20bf4735d15291",
+    "url": "https://github.com/apertium/apertium-kaz"
+  },
+  "version": "apertium-kaz-95c6dd0d8536+qazmorph-bf1f31ff6e586058"
+}

@@ -165,6 +165,30 @@ selection abstains. Neural mode may select among them when its UD features
 differ; an otherwise exact tie keeps the original FST candidate because the
 original sequence is the stable prefix.
 
+## Productive OOV root contract
+
+Productive guessing runs only when the compiled dictionary supplies no atomic
+word reading. Its baseline identity-copies a nonempty Cyrillic prefix and
+permits one final surface-to-lemma voicing pair: `б→п`, `г→к`, or `ғ→қ`.
+Two additive noun-only relations are narrower:
+
+- high-vowel syncope may output exactly one `ы` or `і`, immediately before the
+  final identity-copied root consonant; a nonempty surface suffix is mandatory,
+  so unsuffixed fragments such as `ауз` and `орн` are not roots;
+- back-harmony suffix vowels may be normalized only when the recovered lemma
+  ends in the literal compound head `кубок`. This covers `кубогы`,
+  `кубогының`, and `суперкубогы` without generalizing to every
+  г-final word.
+
+The generic loan inference is forbidden: `каталогы→каталок`,
+`аналогы→аналок`, and `блогы→блок` fail immutable probes. The
+verifier proves the earlier relation is a subset, optimized serialization is
+relation-equivalent, and no input-epsilon cycle is reachable. The syncope
+branch contains one structurally bounded input-epsilon root arc, never a
+repeatable epsilon template. Runtime validation requires `<n>` as the first tag
+for both additive relations. Bounded ranking then interleaves normalized lemma
+groups depthwise without removing any root present in the former top-k.
+
 ## Scores and selection
 
 - Unweighted FST and CG readings: `score = null`.
@@ -175,12 +199,47 @@ None of these is advertised as a calibrated language-wide probability. A token
 has `selected = null` whenever the active mode abstains.
 
 Resource/runtime provenance distinguishes functional execution from an
-official verified run. Resource v3 binds an optimized finite guesser and a
-read-only, completely inventoried extracted HFST/CG bundle. Explicit executable
-overrides, ambient library search paths, and legacy v2 rollback set
+official verified run. Resource v3 binds an optimized guesser and a read-only,
+completely inventoried extracted HFST/CG bundle. Its legacy finiteness-v1
+result authorizes productive analysis only for the exact f03e bundle; unknown
+valid v1 bundles are nonproductive/nonofficial and malformed proof sections
+fail closed. Resource v4 additionally binds a productive generator that is the
+proven exact inverse of a `Dir/LR`-free generation-safe subset of the bounded
+analyzer. The subset is formally included in but strictly narrower than full
+analysis, and every installed optimized analyzer/generator is
+relation-equivalent to its standard proof input. V2/v3 never expose productive
+generation. Explicit executable overrides, ambient library search paths, and
+legacy v2 rollback set
 `official=false`. The extracted subset is verified, but host-provided ELF
 dependencies are not byte-locked; provenance therefore states
 `byte_closed=false` rather than implying a hermetic operating-system image.
+Every exact-uppercase ambient `LD_*`/`DYLD_*` value and `GLIBC_TUNABLES` is
+removed from native-helper children and represented only by presence/removal
+flags and hashes. This does not retroactively sanitize the Python parent: a
+relevant `LD_*`/`DYLD_*` override, or an untrusted Windows loader `PATH`,
+present at parent startup remains a non-official provenance condition. Linux's
+effective helper library path is derived only from portable manifest-bound
+runtime directories; Windows helpers use an empty child `PATH` and their own
+bound directory as `cwd`.
+
+`Analyzer.generate()` is dictionary-only unless `productive=True` is explicit.
+The opt-in path accepts exact structured tag atoms, gives dictionary output
+absolute priority, and reaches the productive inverse only on a complete zero.
+The lemma must be an NFC lowercase 2–32-character Kazakh-Cyrillic root with a
+vowel, no triple repeat, no final `ь/ъ`, and no `ыы/іі`; whitespace and
+hyphens are never coerced. Every generated candidate must retain the exact raw
+reading in the public analyzer lattice after dictionary, projection, fixlist,
+and configured OOV ranking precedence. One absolute deadline covers lookup
+locking, process startup, I/O, strict protocol validation/retry, and every
+public-lattice backcheck. Incomplete responses and backchecks fail closed.
+
+Resource producer source and runtime consumer source are separate provenance
+domains. For bf1f, the exact producer bytes live under
+`packaging/resource-producer/bf1f31ff6e5860585b9e4134f12dcfb9d6df8030ee87b368e5a5f29eb45c1188/`
+and remain bound to the sealed manifest. Later consumer hardening must not be
+substituted for those bytes or used to reseal bf1f. Corresponding-source
+packaging verifies that snapshot and carries the pinned Apertium and toolchain
+source closures separately.
 
 Constraint Grammar operates separately on the atomic and phrase streams. An
 exact atomic CG cohort retains the established pruning behavior; if CG does not

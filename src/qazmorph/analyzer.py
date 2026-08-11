@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import time
 import unicodedata
 from bisect import bisect_left, bisect_right
 from collections.abc import Sequence
@@ -17,11 +18,16 @@ from .backend import (
     PROTECTED_CHARACTERS,
 )
 from .fixlist import load_fixlist
-from .guesser import OpenClassGuesser
+from .generator import GenerationResult, ProductiveGenerator, exact_lexical_form
+from .guesser import OpenClassGuesser, productive_surface_eligible
 from .normalization import nfc_with_boundary_map
 from .stream import RawSegment, parse_analysis, parse_apertium_stream
 from .tags import UD_PROFILES, project_ud_alternatives
 from .types import Analysis, AnalysisSpan, Document, Morpheme, Token
+
+
+GENERATION_QUERY_BYTE_LIMIT = 4096
+GENERATION_RECORD_CONTROLS = frozenset("<>[]{}\t\r\n\0")
 
 
 @dataclass(frozen=True, slots=True)
@@ -161,6 +167,7 @@ class Analyzer:
         self.guesser = OpenClassGuesser(
             self.backend, ud_profile=ud_profile
         )
+        self.productive_generator = ProductiveGenerator(self.backend)
         self.fixlist = (
             load_fixlist(fixlist, ud_profile=ud_profile) if fixlist else {}
         )
@@ -175,6 +182,7 @@ class Analyzer:
         """Release the lazily started OOV lookup worker."""
 
         self.guesser.close()
+        self.productive_generator.close()
 
     def __enter__(self) -> Analyzer:
         return self
@@ -182,19 +190,188 @@ class Analyzer:
     def __exit__(self, exc_type: object, exc: object, traceback: object) -> None:
         self.close()
 
-    def generate(self, lemma: str, tags: list[str] | tuple[str, ...], *, limit: int = 128) -> list[str]:
-        """Generate surface forms for one exact Apertium-style lexical reading."""
+    def generate(
+        self,
+        lemma: str,
+        tags: list[str] | tuple[str, ...],
+        *,
+        limit: int = 128,
+        productive: bool = False,
+        timeout: float | None = None,
+    ) -> list[str]:
+        """Generate one reading, optionally using the proven OOV inverse.
 
-        if limit < 1:
+        The default dictionary-only path retains the strict 0.2.3 public input
+        contract. Productive generation is explicit and is attempted only
+        after a complete dictionary zero.
+        """
+
+        return list(
+            self.generate_detailed(
+                lemma,
+                tags,
+                limit=limit,
+                productive=productive,
+                timeout=timeout,
+            ).forms
+        )
+
+    def generate_detailed(
+        self,
+        lemma: str,
+        tags: list[str] | tuple[str, ...],
+        *,
+        limit: int = 128,
+        productive: bool = False,
+        timeout: float | None = None,
+    ) -> GenerationResult:
+        """Return generated forms with dictionary/productive provenance."""
+
+        if not isinstance(productive, bool):
+            raise ValueError("productive must be a boolean")
+        if productive:
+            # Validate the exact structured record before any helper sees it.
+            exact_lexical_form(lemma, tags)
+            return self.productive_generator.generate(
+                lemma,
+                tuple(tags),
+                limit=limit,
+                timeout=timeout,
+                public_roundtrip_check=self._productive_generation_roundtrip,
+            )
+
+        if timeout is not None:
+            raise ValueError("generation timeout is supported only in productive mode")
+
+        # This is the audited 0.2.3 dictionary-generation validation contract.
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
             raise ValueError("generation limit must be positive")
-        if any(char in lemma for char in "<>\r\n"):
+        if not isinstance(lemma, str) or not lemma:
+            raise ValueError("lemma must be a nonempty string")
+        if any(
+            char in GENERATION_RECORD_CONTROLS
+            or unicodedata.category(char) in {"Cc", "Cs", "Zl", "Zp"}
+            for char in lemma
+        ):
             raise ValueError("lemma contains reserved morphology syntax")
+        if (
+            isinstance(tags, (str, bytes))
+            or not isinstance(tags, Sequence)
+            or not tags
+            or any(not isinstance(tag, str) for tag in tags)
+        ):
+            raise ValueError("tags must be a nonempty sequence of strings")
         normalized_tags = tuple(tag.strip(" <>") for tag in tags)
-        if any(not re.fullmatch(r"[A-Za-z0-9_:-]+", tag) for tag in normalized_tags):
+        if any(
+            not re.fullmatch(r"[A-Za-z0-9_:-]+", tag)
+            for tag in normalized_tags
+        ):
             raise ValueError("invalid morphology tag")
         escaped_lemma = lemma.replace("\\", "\\\\").replace("+", "\\+")
-        lexical_form = escaped_lemma + "".join(f"<{tag}>" for tag in normalized_tags)
-        return self.backend.generate(lexical_form, limit=limit)
+        lexical_form = escaped_lemma + "".join(
+            f"<{tag}>" for tag in normalized_tags
+        )
+        if len(lexical_form.encode("utf-8")) > GENERATION_QUERY_BYTE_LIMIT:
+            raise ValueError(
+                "exact morphology query exceeds the bounded generator input size"
+            )
+        forms = tuple(self.backend.generate(lexical_form, limit=limit))
+        return GenerationResult(
+            forms,
+            "dictionary" if forms else "none",
+            productive_attempted=False,
+            reason=None if forms else "dictionary_zero",
+        )
+
+    def _productive_generation_roundtrip(
+        self,
+        surface: str,
+        lexical_form: str,
+        deadline: float,
+    ) -> bool:
+        """Check one candidate against the exact public single-token lattice."""
+
+        if not productive_surface_eligible(surface):
+            return False
+
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise BackendError(
+                "productive generation public-lattice deadline expired before analysis"
+            )
+        lattice_stream, _ = self.backend.analyze_stream_pair(
+            surface,
+            disambiguate=False,
+            timeout=remaining,
+        )
+        segments = self._align_segments(
+            surface,
+            parse_apertium_stream(lattice_stream),
+        )
+        intervals = self._atomic_intervals(surface, segments)
+        if intervals != ((0, len(surface)),):
+            return False
+        if not self._is_exact_partition(intervals, segments):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise BackendError(
+                    "productive generation public-lattice deadline expired "
+                    "before exact atomic analysis"
+                )
+            atomic_stream, _ = self.backend.analyze_atomic_stream_pair(
+                surface,
+                intervals,
+                disambiguate=False,
+                timeout=remaining,
+            )
+            segments = self._split_plain_segments_at_intervals(
+                intervals,
+                self._align_segments(
+                    surface,
+                    parse_apertium_stream(atomic_stream),
+                ),
+            )
+        indexed = self._raw_by_interval(intervals, segments)
+        raw_candidates, _sentence_end, exact = indexed[0]
+        if not exact and raw_candidates:
+            raise BackendError(
+                "productive generation backcheck received an inexact backend cohort"
+            )
+        analyses = self._raw_analyses(
+            surface,
+            raw_candidates if exact else (),
+            preserve_backend=False,
+        )
+        if analyses:
+            return any(analysis.raw == lexical_form for analysis in analyses)
+        if not self.use_guesser:
+            return False
+
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise BackendError(
+                "productive generation public-lattice deadline expired before guessing"
+            )
+        outcome = self.guesser._guess_detailed(
+            surface,
+            limit=self.guess_limit,
+            generate_all=False,
+            timeout=remaining,
+        )
+        if not outcome.complete:
+            raise BackendError(
+                "public productive-analyzer backcheck was incomplete"
+                f" ({outcome.reason or 'unknown reason'})"
+            )
+        return any(
+            analysis.raw == lexical_form for analysis in outcome.candidates
+        )
+
+    @property
+    def generation_diagnostics(self) -> dict[str, int]:
+        """Snapshot bounded productive-generation worker diagnostics."""
+
+        return self.productive_generator.diagnostics
 
     @staticmethod
     def _align(source: str, cursor: int, surface: str) -> tuple[int, int, bool]:

@@ -226,7 +226,9 @@ class RawCounts:
                     else unicodedata.normalize("NFC", token.text)
                 ).casefold()
                 kinds = [
-                    productive_root_kind(folded_surface, analysis.lemma)
+                    productive_root_kind(
+                        folded_surface, analysis.lemma, analysis.tags
+                    )
                     for analysis in guesser_candidates
                 ]
                 if any(kind is None for kind in kinds):

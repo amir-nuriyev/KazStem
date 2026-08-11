@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from copy import deepcopy
 import json
 import os
 from pathlib import Path
+import re
 import unittest
 
 from qazmorph import Analyzer
+from qazmorph.backend import _has_verified_v3_guesser_gate, GUESSER_FINITE_SCHEMA_V2
 from qazmorph.guesser import (
     CYCLE_MARKER,
     OpenClassGuesser,
@@ -53,10 +56,16 @@ class ProductiveGuesserResourceTests(unittest.TestCase):
                     self.assertEqual(fields[0], surface)
                     raw = fields[1]
                     lemma = raw.split("<", 1)[0] if "<" in raw else ""
+                    tags = tuple(re.findall(r"<([^<>]+)>", raw))
                     self.assertTrue(lemma)
-                    self.assertIsNotNone(productive_root_kind(surface, lemma), raw)
+                    self.assertIsNotNone(
+                        productive_root_kind(surface, lemma, tags), raw
+                    )
                     readings.add(raw)
                 self.assertTrue(set(probe.get("expected_readings", ())) <= readings)
+                self.assertTrue(
+                    set(probe.get("forbidden_readings", ())).isdisjoint(readings)
+                )
 
         diagnostics = self.guesser.diagnostics
         for counter in (
@@ -89,6 +98,37 @@ class ProductiveGuesserResourceTests(unittest.TestCase):
                 )
 
         self.assertEqual(self.guesser.diagnostics["protocol_restarts"], 0)
+
+    def test_active_v2_gate_is_accepted_and_tamper_sensitive(self) -> None:
+        manifest = self.analyzer.backend.manifest
+        result = manifest["build"]["verification"][
+            "productive_guesser_finite_valued"
+        ]["result"]
+        if result.get("schema") != GUESSER_FINITE_SCHEMA_V2:
+            self.skipTest("active resource does not carry the v2 guesser gate")
+        self.assertTrue(_has_verified_v3_guesser_gate(manifest))
+
+        mutations = []
+        for section, field, value in (
+            ("graph", "reachable_input_epsilon_cycle", True),
+            ("baseline_relation", "baseline_subset_of_final", False),
+            ("no_cap_probes", "forbidden_readings_observed", 1),
+        ):
+            changed = deepcopy(manifest)
+            changed["build"]["verification"][
+                "productive_guesser_finite_valued"
+            ]["result"][section][field] = value
+            mutations.append(changed)
+        generic_loan = deepcopy(manifest)
+        generic_loan["build"]["verification"][
+            "productive_guesser_finite_valued"
+        ]["result"]["no_cap_probes"]["bounded_root_relation"][
+            "loan_back_harmony"
+        ]["generic_back_harmony_g_to_k"] = True
+        mutations.append(generic_loan)
+        for index, changed in enumerate(mutations):
+            with self.subTest(mutation=index):
+                self.assertFalse(_has_verified_v3_guesser_gate(changed))
 
 
 if __name__ == "__main__":

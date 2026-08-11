@@ -4,6 +4,7 @@ import os
 import json
 from pathlib import Path
 import random
+import sys
 import tempfile
 import unittest
 import unicodedata
@@ -13,6 +14,9 @@ from qazmorph.stream import parse_analysis, parse_apertium_stream
 
 
 RESOURCE_DIR = os.environ.get("QAZMORPH_RESOURCE_DIR")
+BF1F_RESOURCE_ID = (
+    "bf1f31ff6e5860585b9e4134f12dcfb9d6df8030ee87b368e5a5f29eb45c1188"
+)
 
 
 def mixed_unicode_fuzz_text() -> str:
@@ -63,11 +67,35 @@ class ResourceIntegrationTests(unittest.TestCase):
         assert RESOURCE_DIR is not None
         cls.resource_dir = Path(RESOURCE_DIR)
         cls.analyzer = Analyzer(resource_dir=cls.resource_dir, guess=False)
+        cls.productive_analyzer = Analyzer(resource_dir=cls.resource_dir, guess=True)
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.productive_analyzer.close()
+        cls.analyzer.close()
 
     def test_manifest_version_and_resource_path_are_exposed(self) -> None:
         self.assertEqual(self.analyzer.backend.resource_dir, self.resource_dir.resolve())
         self.assertIsInstance(self.analyzer.backend.resource_version, str)
         self.assertTrue(self.analyzer.backend.resource_version)
+
+    def test_bf1f_resolves_the_locked_linux_runtime_as_official(self) -> None:
+        if not sys.platform.startswith("linux"):
+            self.skipTest("bf1f detached-runtime acceptance is Linux-specific")
+        if self.analyzer.backend.manifest.get("bundle_id") != BF1F_RESOURCE_ID:
+            self.skipTest("requires the sealed bf1f resource bundle")
+        provenance = self.analyzer.backend.runtime_provenance()
+        self.assertEqual(self.analyzer.backend.toolchain_origin, "platform-runtime-lock")
+        self.assertTrue(provenance["official"], provenance["non_official_reasons"])
+        self.assertEqual(provenance["non_official_reasons"], [])
+        self.assertEqual(
+            provenance["active_runtime"]["bundle_id"],
+            "39a01ea673d024b0d6080739b5bb23c76daf0f7ed7bdb95dd1157d9dce4b627e",
+        )
+        self.assertIn(
+            BF1F_RESOURCE_ID,
+            provenance["active_runtime"]["platform_lock"]["resource_bundle_ids"],
+        )
 
     def test_common_greeting_has_a_dictionary_analysis(self) -> None:
         document = self.analyzer.analyze("Сәлем")
@@ -468,6 +496,119 @@ class ResourceIntegrationTests(unittest.TestCase):
         if not generator.is_file() or not self.analyzer.backend.hfst_optimized_lookup:
             self.skipTest("resource bundle has no generator runtime")
         self.assertEqual(self.analyzer.generate("мүлдемжоқлемма", ("n", "nom")), [])
+
+    def test_productive_generation_is_explicit_dictionary_first_and_round_trips(self) -> None:
+        productive = self.resource_dir / "kaz.guesser.autogen.hfstol"
+        if (
+            not productive.is_file()
+            or not self.analyzer.backend.productive_generator_safe
+        ):
+            self.skipTest("resource bundle has no verified productive generator")
+
+        self.assertEqual(
+            self.analyzer.generate("мүлдемжоқлемма", ("n", "pl", "dat")),
+            [],
+        )
+        suppressed = self.analyzer.generate_detailed(
+            "мүлдемжоқлемма",
+            ("n", "pl", "dat"),
+            productive=True,
+        )
+        self.assertEqual(suppressed.source, "none")
+        self.assertEqual(suppressed.reason, "public_roundtrip_rejected")
+
+        result = self.productive_analyzer.generate_detailed(
+            "мүлдемжоқлемма",
+            ("n", "pl", "dat"),
+            productive=True,
+        )
+        self.assertEqual(result.source, "productive")
+        self.assertIn("мүлдемжоқлеммаларға", result.forms)
+        for form in result.forms:
+            document = self.productive_analyzer.analyze(form)
+            self.assertTrue(
+                any(
+                    analysis.raw == "мүлдемжоқлемма<n><pl><dat>"
+                    for token in document.tokens
+                    for analysis in token.analyses
+                )
+            )
+
+    def test_productive_generation_never_overrides_dictionary_irregulars(self) -> None:
+        productive = self.resource_dir / "kaz.guesser.autogen.hfstol"
+        if (
+            not productive.is_file()
+            or not self.analyzer.backend.productive_generator_safe
+        ):
+            self.skipTest("resource bundle has no verified productive generator")
+        cases = (
+            ("ерін", ("n", "px1sg", "nom"), "ернім", "ерінім"),
+            ("мұрын", ("n", "px1sg", "nom"), "мұрным", "мұрыным"),
+            ("қауіп", ("n", "px1sg", "nom"), "қаупім", "қауібім"),
+        )
+        for lemma, tags, required, forbidden in cases:
+            with self.subTest(lemma=lemma):
+                result = self.productive_analyzer.generate_detailed(
+                    lemma, tags, productive=True
+                )
+                self.assertEqual(result.source, "dictionary")
+                self.assertIn(required, result.forms)
+                self.assertNotIn(forbidden, result.forms)
+                self.assertFalse(result.productive_attempted)
+
+    def test_productive_generation_rejects_boundaries_and_generic_loan_forms(self) -> None:
+        productive = self.resource_dir / "kaz.guesser.autogen.hfstol"
+        if (
+            not productive.is_file()
+            or not self.analyzer.backend.productive_generator_safe
+        ):
+            self.skipTest("resource bundle has no verified productive generator")
+
+        for lemma in ("Тосынтүбір", "тосын түбір", "тосын-түбір"):
+            with self.subTest(lemma=lemma):
+                result = self.productive_analyzer.generate_detailed(
+                    lemma, ("n", "nom"), productive=True
+                )
+                self.assertEqual(result.source, "none")
+                self.assertEqual(result.reason, "ineligible_lemma")
+
+        with self.assertRaises(ValueError):
+            self.productive_analyzer.generate(
+                "тосынтүбір", ("<n>", "nom"), productive=True
+            )
+        forbidden = {
+            "блок": "блогы",
+            "каталок": "каталогы",
+            "аналок": "аналогы",
+            "психолок": "психологы",
+        }
+        for lemma, surface in forbidden.items():
+            with self.subTest(lemma=lemma):
+                forms = self.productive_analyzer.generate(
+                    lemma, ("n", "px3sp", "nom"), productive=True
+                )
+                self.assertNotIn(surface, forms)
+
+    def test_productive_generation_excludes_analysis_only_direction_variants(self) -> None:
+        productive = self.resource_dir / "kaz.guesser.autogen.hfstol"
+        if (
+            not productive.is_file()
+            or not self.analyzer.backend.productive_generator_safe
+        ):
+            self.skipTest("resource bundle has no verified productive generator")
+        cases = (
+            ("тосынтүбір", ("n", "ins"), "тосынтүбірмен", "тосынтүбірменен"),
+            ("тосынсапа", ("adj", "comp"), "тосынсапарақ", "тосынсапалау"),
+            ("тосынет", ("v", "iv", "fut_plan", "p3", "sg"), "тосынетпек", "тосынетпекші"),
+        )
+        for lemma, tags, required, forbidden in cases:
+            with self.subTest(lemma=lemma):
+                result = self.productive_analyzer.generate_detailed(
+                    lemma, tags, productive=True
+                )
+                self.assertEqual(result.source, "productive")
+                self.assertIn(required, result.forms)
+                self.assertNotIn(forbidden, result.forms)
 
     def test_deterministic_mixed_unicode_fuzz_is_lossless(self) -> None:
         text = mixed_unicode_fuzz_text()

@@ -1,0 +1,174 @@
+{
+  "schema": "kazstem-linux-runtime-source-lock-v1",
+  "distribution": "Ubuntu 24.04 (noble) exact package subset from KazStem r4",
+  "platform": {
+    "system": "linux",
+    "machine": "x86_64",
+    "minimum_os": "Ubuntu 24.04 x86_64 (glibc 2.39)"
+  },
+  "transform": "exact-r4-subset",
+  "archives": [
+    {
+      "component": "CG-3 executable",
+      "filename": "cg3_1.4.6-1build2_amd64.deb",
+      "url": "https://gb.archive.ubuntu.com/ubuntu/pool/universe/c/cg3/cg3_1.4.6-1build2_amd64.deb",
+      "bytes": 166006,
+      "sha256": "1cbbe62b20f96ad48ef29004beea231577e6e0cdede760de774447ad207fe4c6"
+    },
+    {
+      "component": "HFST executables",
+      "filename": "hfst_3.16.0-5build4_amd64.deb",
+      "url": "https://gb.archive.ubuntu.com/ubuntu/pool/universe/h/hfst/hfst_3.16.0-5build4_amd64.deb",
+      "bytes": 549092,
+      "sha256": "6d32eaef2355c81f5a226a73b79bc168c47ebb5f50a4e4e8f554f4ee60b04cd7"
+    },
+    {
+      "component": "libcg3",
+      "filename": "libcg3-1_1.4.6-1build2_amd64.deb",
+      "url": "https://gb.archive.ubuntu.com/ubuntu/pool/universe/c/cg3/libcg3-1_1.4.6-1build2_amd64.deb",
+      "bytes": 345116,
+      "sha256": "7da58db0c64b9c9f9a9741179db0ff53a30b7755bea4d402a130d0219878afa5"
+    },
+    {
+      "component": "foma",
+      "filename": "libfoma0t64_1%3a0.10.0+s311-1.2build2_amd64.deb",
+      "url": "https://gb.archive.ubuntu.com/ubuntu/pool/universe/f/foma/libfoma0t64_0.10.0+s311-1.2build2_amd64.deb",
+      "bytes": 112052,
+      "sha256": "99e3be6c2292d3b495e20d136c2f8b9658235b016dd0b239a26d01fe2a1db1d7"
+    },
+    {
+      "component": "OpenFst",
+      "filename": "libfst22_1.7.9-5build1_amd64.deb",
+      "url": "https://gb.archive.ubuntu.com/ubuntu/pool/universe/o/openfst/libfst22_1.7.9-5build1_amd64.deb",
+      "bytes": 2196570,
+      "sha256": "7316d432472a5405767e131742f2165832a14ce5fded50f4fb21d0f6c97b10a3"
+    },
+    {
+      "component": "libhfst",
+      "filename": "libhfst55_3.16.0-5build4_amd64.deb",
+      "url": "https://gb.archive.ubuntu.com/ubuntu/pool/universe/h/hfst/libhfst55_3.16.0-5build4_amd64.deb",
+      "bytes": 1695820,
+      "sha256": "b037a2d9c98295705635659ffb9711e19101662d1c2397f32d51593fcde8c050"
+    }
+  ],
+  "corresponding_sources": [
+    {
+      "component": "CG-3 Debian packaging",
+      "revision": "1.4.6-1build2",
+      "filename": "cg3_1.4.6-1build2.debian.tar.xz",
+      "url": "https://gb.archive.ubuntu.com/ubuntu/pool/universe/c/cg3/cg3_1.4.6-1build2.debian.tar.xz",
+      "bytes": 5064,
+      "sha256": "be1faf15db77657e933a6ddf3e7b316db57e9067a03b61fd58918f4b592d7255"
+    },
+    {
+      "component": "CG-3 source descriptor",
+      "revision": "1.4.6-1build2",
+      "filename": "cg3_1.4.6-1build2.dsc",
+      "url": "https://gb.archive.ubuntu.com/ubuntu/pool/universe/c/cg3/cg3_1.4.6-1build2.dsc",
+      "bytes": 2242,
+      "sha256": "64c4e38a473225cc9a3a18cd4c87a6e9bf7589f1a4cb9a047dd7b661f4eee621"
+    },
+    {
+      "component": "CG-3 upstream source",
+      "revision": "1.4.6",
+      "filename": "cg3_1.4.6.orig.tar.bz2",
+      "url": "https://gb.archive.ubuntu.com/ubuntu/pool/universe/c/cg3/cg3_1.4.6.orig.tar.bz2",
+      "bytes": 301605,
+      "sha256": "b0f7a5a7bd009c5329c77d50bc5882e3185b6a609b78f349221a93dde9221753"
+    },
+    {
+      "component": "foma Debian packaging",
+      "revision": "0.10.0+s311-1.2build2",
+      "filename": "foma_0.10.0+s311-1.2build2.debian.tar.xz",
+      "url": "https://gb.archive.ubuntu.com/ubuntu/pool/universe/f/foma/foma_0.10.0+s311-1.2build2.debian.tar.xz",
+      "bytes": 5348,
+      "sha256": "475ea0d9b9cbd6d58c69a8574feb1217a746e99972349c72e1400b6cf4c577ab"
+    },
+    {
+      "component": "foma source descriptor",
+      "revision": "0.10.0+s311-1.2build2",
+      "filename": "foma_0.10.0+s311-1.2build2.dsc",
+      "url": "https://gb.archive.ubuntu.com/ubuntu/pool/universe/f/foma/foma_0.10.0+s311-1.2build2.dsc",
+      "bytes": 2441,
+      "sha256": "7e306444bfd6f4661293535cfc6120e3c04fc1807d9cf3317415d1fd30519985"
+    },
+    {
+      "component": "foma upstream source",
+      "revision": "0.10.0+s311",
+      "filename": "foma_0.10.0+s311.orig.tar.bz2",
+      "url": "https://gb.archive.ubuntu.com/ubuntu/pool/universe/f/foma/foma_0.10.0+s311.orig.tar.bz2",
+      "bytes": 119256,
+      "sha256": "9580349296e7fcbee1073ccec982d1e4195ee5330bb3a0b33ea6ef7d327a0663"
+    },
+    {
+      "component": "HFST Debian packaging",
+      "revision": "3.16.0-5build4",
+      "filename": "hfst_3.16.0-5build4.debian.tar.xz",
+      "url": "https://gb.archive.ubuntu.com/ubuntu/pool/universe/h/hfst/hfst_3.16.0-5build4.debian.tar.xz",
+      "bytes": 8692,
+      "sha256": "7aaa5ec1e2d7346514e14e00d36b8cc60c172eeda2111a10d0faf6857b34058c"
+    },
+    {
+      "component": "HFST source descriptor",
+      "revision": "3.16.0-5build4",
+      "filename": "hfst_3.16.0-5build4.dsc",
+      "url": "https://gb.archive.ubuntu.com/ubuntu/pool/universe/h/hfst/hfst_3.16.0-5build4.dsc",
+      "bytes": 2447,
+      "sha256": "b2467f45d40deba332acbe12214db67fcda63dfbb54e8c9d0b024a2ac27c38e1"
+    },
+    {
+      "component": "HFST upstream source",
+      "revision": "3.16.0",
+      "filename": "hfst_3.16.0.orig.tar.bz2",
+      "url": "https://gb.archive.ubuntu.com/ubuntu/pool/universe/h/hfst/hfst_3.16.0.orig.tar.bz2",
+      "bytes": 1914957,
+      "sha256": "588b6a72017f8a8a771c0bb6805791a5c98cda31244fdacedc0ef272342a6c2f"
+    },
+    {
+      "component": "OpenFst Debian packaging",
+      "revision": "1.7.9-5build1",
+      "filename": "openfst_1.7.9-5build1.debian.tar.xz",
+      "url": "https://gb.archive.ubuntu.com/ubuntu/pool/universe/o/openfst/openfst_1.7.9-5build1.debian.tar.xz",
+      "bytes": 17132,
+      "sha256": "a5637b5128ee7b009a32b08a8a666b539807bf488cf496430ab49f4a1a91d482"
+    },
+    {
+      "component": "OpenFst source descriptor",
+      "revision": "1.7.9-5build1",
+      "filename": "openfst_1.7.9-5build1.dsc",
+      "url": "https://gb.archive.ubuntu.com/ubuntu/pool/universe/o/openfst/openfst_1.7.9-5build1.dsc",
+      "bytes": 2313,
+      "sha256": "529ba19bfc285b23dab04ed5ace0172d22513ad15435371ff9a98ff3a5fb0c52"
+    },
+    {
+      "component": "OpenFst upstream source",
+      "revision": "1.7.9",
+      "filename": "openfst_1.7.9.orig.tar.gz",
+      "url": "https://gb.archive.ubuntu.com/ubuntu/pool/universe/o/openfst/openfst_1.7.9.orig.tar.gz",
+      "bytes": 1320008,
+      "sha256": "a8bcd9a5da04b5277523dc8c99c378667fd4ae7f90a1ef5eb808e75c3936c1b7"
+    }
+  ],
+  "components": [
+    {
+      "name": "HFST command-line tools and libhfst",
+      "version": "3.16.0-5build4",
+      "license": "GPL-3.0-or-later / LGPL-3.0-or-later"
+    },
+    {
+      "name": "CG-3 and libcg3",
+      "version": "1.4.6-1build2",
+      "license": "GPL-3.0-or-later"
+    },
+    {
+      "name": "foma",
+      "version": "0.10.0+s311-1.2build2",
+      "license": "Apache-2.0"
+    },
+    {
+      "name": "OpenFst",
+      "version": "1.7.9-5build1",
+      "license": "Apache-2.0"
+    }
+  ]
+}

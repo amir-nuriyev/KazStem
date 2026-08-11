@@ -6,10 +6,14 @@ from pathlib import Path
 import tempfile
 import unittest
 from xml.etree import ElementTree
+from xml.sax.saxutils import escape as sax_escape
+from xml.sax.saxutils import quoteattr as sax_quoteattr
 
 from qazmorph.fixlist import load_fixlist
 from qazmorph.formats import (
     XMLFormatError,
+    _escape_xml_text,
+    _quote_xml_attribute,
     format_conllu,
     format_jsonl,
     format_mystem_json,
@@ -143,13 +147,13 @@ class TextFormatterTests(unittest.TestCase):
     def test_default_text_output_emits_only_lexical_tokens(self) -> None:
         self.assertEqual(
             format_text(sample_document()),
-            "Сәлем{сәлем|сәлем}",
+            "Сәлем{сәлем}",
         )
 
     def test_copy_input_preserves_spaces_and_punctuation(self) -> None:
         self.assertEqual(
             format_text(sample_document(), copy_input=True),
-            "Сәлем{сәлем|сәлем} !",
+            "Сәлем{сәлем} !",
         )
 
     def test_lemmas_grammar_and_weights_are_independently_selectable(self) -> None:
@@ -219,7 +223,7 @@ class TextFormatterTests(unittest.TestCase):
             format_text(
                 sample_document(), copy_input=True, sentence_markers=True
             ),
-            "Сәлем{сәлем|сәлем} !{\\s}",
+            "Сәлем{сәлем} !{\\s}",
         )
 
     def test_physical_line_endings_survive_without_copy_mode(self) -> None:
@@ -429,7 +433,7 @@ class MyStemJsonFormatterTests(unittest.TestCase):
             "test",
         )
         plain = json.loads(format_mystem_json(document))[0]["analysis"]
-        self.assertEqual(plain, [{"lex": "foo", "qual": "bastard"}] * 2)
+        self.assertEqual(plain, [{"lex": "foo", "qual": "bastard"}])
         merged = json.loads(
             format_mystem_json(
                 document,
@@ -443,11 +447,25 @@ class MyStemJsonFormatterTests(unittest.TestCase):
             [
                 {
                     "lex": "foo",
-                    "gr": "(NOUN|VERB)",
-                    "qual": "bastard",
                     "wt": 1.0,
+                    "qual": "bastard",
+                    "gr": "(NOUN|VERB)",
                 }
             ],
+        )
+
+    def test_compatibility_json_uses_mystem_serialized_field_order(self) -> None:
+        analysis = make_analysis("foo", "NOUN", guessed=True, score=0.4)
+        document = Document(
+            "foo", [Token("foo", 0, 3, "word", [analysis])], "lattice", "test"
+        )
+        self.assertEqual(
+            format_mystem_json(
+                document,
+                gram_info=True,
+                weights=True,
+            ),
+            '[{"analysis":[{"lex":"foo","wt":0.4,"qual":"bastard","gr":"NOUN"}],"text":"foo"}]\n',
         )
 
     def test_newline_mode_emits_one_mystem_object_per_line(self) -> None:
@@ -461,7 +479,120 @@ class MyStemJsonFormatterTests(unittest.TestCase):
         self.assertEqual(json.loads(lines[1]), {"text": " "})
 
 
+class MyStemProjectionDeduplicationTests(unittest.TestCase):
+    def setUp(self) -> None:
+        features = (("Case", "Nom"), ("Number", "Plur"))
+        self.analyses = [
+            make_analysis(
+                "кітап",
+                "NOUN",
+                features=features,
+                tags=("n", "pl", "nom"),
+                raw="кітап<n><pl><nom>",
+            ),
+            make_analysis(
+                "кітап",
+                "NOUN",
+                features=features,
+                tags=("n", "pl", "nom"),
+                raw="кітап<n><nom><pl>",
+            ),
+            make_analysis(
+                "кітап",
+                "NOUN",
+                features=features,
+                tags=("n", "pl", "nom"),
+                raw="кітап<n><pl><nom><attr>",
+            ),
+        ]
+        self.document = Document(
+            "кітаптар",
+            [Token("кітаптар", 0, 8, "word", self.analyses)],
+            "lattice",
+            "test",
+        )
+
+    def test_lossy_mystem_formats_stably_deduplicate_projected_rows(self) -> None:
+        expected = "кітап=NOUN,Case=Nom,Number=Plur"
+        self.assertEqual(format_text(self.document, gram_info=True), f"кітаптар{{{expected}}}")
+
+        json_rows = json.loads(
+            format_mystem_json(self.document, gram_info=True)
+        )
+        self.assertEqual(
+            json_rows[0]["analysis"],
+            [{"lex": "кітап", "gr": "NOUN,Case=Nom,Number=Plur"}],
+        )
+
+        xml_word = ElementTree.fromstring(
+            format_xml(self.document).encode("utf-8")
+        ).find("./body/se/w")
+        self.assertIsNotNone(xml_word)
+        assert xml_word is not None
+        self.assertEqual(len(xml_word.findall("ana")), 1)
+
+    def test_rich_jsonl_retains_every_distinct_raw_reading(self) -> None:
+        row = json.loads(format_jsonl(self.document).splitlines()[0])
+        self.assertEqual(
+            [analysis["raw"] for analysis in row["analysis"]],
+            [analysis.raw for analysis in self.analyses],
+        )
+
+    def test_visible_weight_or_qualifier_differences_are_not_collapsed(self) -> None:
+        weighted = Document(
+            "foo",
+            [
+                Token(
+                    "foo",
+                    0,
+                    3,
+                    "word",
+                    [
+                        make_analysis("foo", "NOUN", raw="foo<n><a>", score=0.4),
+                        make_analysis("foo", "NOUN", raw="foo<n><b>", score=0.6),
+                        make_analysis(
+                            "foo",
+                            "NOUN",
+                            raw="foo<n><c>",
+                            score=0.4,
+                            guessed=True,
+                        ),
+                    ],
+                )
+            ],
+            "lattice",
+            "test",
+        )
+        rows = json.loads(
+            format_mystem_json(weighted, gram_info=True, weights=True)
+        )[0]["analysis"]
+        self.assertEqual(len(rows), 3)
+        self.assertEqual([row.get("wt") for row in rows], [0.4, 0.6, 0.4])
+        self.assertNotIn("qual", rows[0])
+        self.assertEqual(rows[2]["qual"], "bastard")
+
+
 class XmlFormatterTests(unittest.TestCase):
+    def test_local_xml_escaping_matches_the_prior_stdlib_behavior(self) -> None:
+        values = (
+            "",
+            "plain ASCII",
+            "қазақша 😀",
+            "&<>",
+            "single'quote",
+            'double"quote',
+            'both\'"quotes',
+            "line\ncarriage\rtab\tend",
+            "&amp; is input text, not a pre-escaped entity",
+        )
+        for value in values:
+            with self.subTest(value=value):
+                self.assertEqual(_escape_xml_text(value), sax_escape(value))
+                self.assertEqual(
+                    _quote_xml_attribute(value),
+                    sax_quoteattr(value),
+                )
+
     def test_xml_escapes_text_and_attributes_and_is_well_formed_shape(self) -> None:
         analysis = make_analysis('a&"b', "NOUN", score=0.5)
         document = Document(
@@ -476,13 +607,33 @@ class XmlFormatterTests(unittest.TestCase):
         )
         output = format_xml(document)
         self.assertTrue(output.startswith('<?xml version="1.0" encoding="UTF-8"?>'))
-        self.assertIn("&lt;<w>&amp;", output)
+        self.assertIn("&lt;<w>", output)
         self.assertIn('lex=\'a&amp;"b\'', output)
         self.assertIn('gr="NOUN"', output)
+        self.assertIn(
+            '<w><ana lex=\'a&amp;"b\' gr="NOUN" />&amp;</w>',
+            output,
+        )
         self.assertNotIn("wt=", output)
         self.assertNotIn("</se><se>", output)
         self.assertTrue(output.endswith("</se></body></html>\n"))
         ElementTree.fromstring(output.encode("utf-8"))
+
+    def test_xml_emits_analyses_before_surface_like_mystem(self) -> None:
+        analyses = [
+            make_analysis("кітап", "NOUN"),
+            make_analysis("кітапта", "VERB", guessed=True),
+        ]
+        document = Document(
+            "кітап", [Token("кітап", 0, 5, "word", analyses)], "lattice", "test"
+        )
+        output = format_xml(document)
+        word = ElementTree.fromstring(output.encode("utf-8")).find("./body/se/w")
+        self.assertIsNotNone(word)
+        assert word is not None
+        self.assertIsNone(word.text)
+        self.assertEqual([child.tag for child in word], ["ana", "ana"])
+        self.assertEqual(word[-1].tail, "кітап")
 
     def test_xml_exposes_guessed_qualifier(self) -> None:
         guessed = make_analysis("foo", "NOUN", guessed=True)
@@ -490,6 +641,16 @@ class XmlFormatterTests(unittest.TestCase):
             "foo", [Token("foo", 0, 3, "word", [guessed])], "lattice", "test"
         )
         self.assertIn('qual="bastard"', format_xml(document))
+
+    def test_xml_uses_mystem_analysis_attribute_order(self) -> None:
+        guessed = make_analysis("foo", "NOUN", guessed=True, score=0.4)
+        document = Document(
+            "foo", [Token("foo", 0, 3, "word", [guessed])], "lattice", "test"
+        )
+        self.assertIn(
+            '<ana lex="foo" wt="0.4" qual="bastard" gr="NOUN" />foo',
+            format_xml(document, weights=True),
+        )
 
     def test_xml_can_omit_nonlexical_input(self) -> None:
         output = format_xml(sample_document(), copy_input=False)

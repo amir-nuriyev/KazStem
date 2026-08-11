@@ -8,6 +8,16 @@ import hashlib
 import json
 from pathlib import Path
 import shutil
+import tarfile
+
+
+PACKAGE_BUILD_STATE = {
+    "distribution_scope": "public",
+    "pages_status": "published",
+    "repository_visibility": "public",
+}
+SOURCE_ARCHIVE_NAME = "kazstem-browser-corresponding-source-0.2.1.tar.gz"
+SOURCE_BROWSER_PREFIX = "./browser-poc/"
 
 
 def sha256(path: Path) -> str:
@@ -25,7 +35,7 @@ def verify_package_manifest(package_root: Path) -> None:
         "branch",
         "file_count",
         "files",
-        "freeze_time_publication_state",
+        "package_build_state",
         "schema",
         "self_excluded",
         "total_bytes",
@@ -33,12 +43,11 @@ def verify_package_manifest(package_root: Path) -> None:
     if set(manifest) != expected_keys:
         raise SystemExit("unexpected package-manifest fields")
     if (
-        manifest["schema"] != "kazstem.browser-isolated-package.v1"
+        manifest["schema"] != "kazstem.browser-isolated-package.v2"
         or manifest["self_excluded"] != "PACKAGE-MANIFEST.json"
-        or manifest["freeze_time_publication_state"]
-        != {"deployed": False, "pushed": False}
+        or manifest["package_build_state"] != PACKAGE_BUILD_STATE
     ):
-        raise SystemExit("invalid package-manifest identity or freeze state")
+        raise SystemExit("invalid package-manifest identity or build state")
 
     observed: dict[str, dict[str, object]] = {}
     for path in sorted(package_root.rglob("*")):
@@ -72,6 +81,96 @@ def verify_package_manifest(package_root: Path) -> None:
         != sum(record["bytes"] for record in observed.values())
     ):
         raise SystemExit("package-manifest count or byte total mismatch")
+
+
+def is_preferred_browser_source(relative: str) -> bool:
+    """Return whether a package file is preferred source shipped in the archive."""
+
+    if relative == "PACKAGE-MANIFEST.json" or "__pycache__" in Path(relative).parts:
+        return False
+    if relative.startswith("reports/"):
+        return False
+    if relative.startswith("web/proofs/") or relative.startswith("web/resources/"):
+        return False
+    if relative in {
+        "web/legal/SOURCE-ARCHIVE.json",
+        f"web/legal/{SOURCE_ARCHIVE_NAME}",
+    }:
+        return False
+    return True
+
+
+def verify_source_archive(package_root: Path, source_archive: Path) -> None:
+    """Require the bundle's browser subtree to equal the current preferred source."""
+
+    expected = {
+        f"{SOURCE_BROWSER_PREFIX}{path.relative_to(package_root).as_posix()}": path
+        for path in sorted(package_root.rglob("*"))
+        if path.is_file()
+        and not path.is_symlink()
+        and is_preferred_browser_source(path.relative_to(package_root).as_posix())
+    }
+    try:
+        archive = tarfile.open(source_archive, mode="r:gz")
+    except (OSError, tarfile.TarError) as error:
+        raise SystemExit(f"invalid corresponding-source archive: {error}") from error
+    with archive:
+        members: dict[str, tarfile.TarInfo] = {}
+        for member in archive.getmembers():
+            name = member.name if member.name.startswith("./") else f"./{member.name}"
+            if name in members:
+                raise SystemExit(f"duplicate corresponding-source member: {name}")
+            members[name] = member
+            if name.startswith(SOURCE_BROWSER_PREFIX) and not (
+                member.isfile() or member.isdir()
+            ):
+                raise SystemExit(
+                    f"browser corresponding source does not permit links/devices: {name}"
+                )
+
+        actual = {
+            name: member
+            for name, member in members.items()
+            if name.startswith(SOURCE_BROWSER_PREFIX) and member.isfile()
+        }
+        if set(actual) != set(expected):
+            missing = sorted(set(expected) - set(actual))
+            extra = sorted(set(actual) - set(expected))
+            raise SystemExit(
+                "corresponding-source browser closure mismatch "
+                f"(missing={missing}, extra={extra})"
+            )
+        for name, path in expected.items():
+            member_file = archive.extractfile(actual[name])
+            if member_file is None:
+                raise SystemExit(f"could not read corresponding-source member: {name}")
+            archived = member_file.read()
+            current = path.read_bytes()
+            if archived != current:
+                raise SystemExit(f"stale corresponding-source browser member: {name}")
+
+        bundle_manifest_member = members.get("./SOURCE-BUNDLE-MANIFEST.json")
+        if bundle_manifest_member is None or not bundle_manifest_member.isfile():
+            raise SystemExit("missing corresponding-source bundle manifest")
+        bundle_manifest_file = archive.extractfile(bundle_manifest_member)
+        if bundle_manifest_file is None:
+            raise SystemExit("could not read corresponding-source bundle manifest")
+        try:
+            bundle_manifest = json.loads(bundle_manifest_file.read().decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise SystemExit("invalid corresponding-source bundle manifest") from error
+        if (
+            bundle_manifest.get("schema")
+            != "kazstem-browser-corresponding-source-v1"
+            or bundle_manifest.get("kazstem")
+            != {
+                "commit": "97cf865a0cef20ee78be1610bbe76ec6c7e52006",
+                "version": "0.2.1",
+            }
+            or bundle_manifest.get("apertium_kaz")
+            != {"commit": "95c6dd0d8536ee69a7058634b03a3e82100b6b6e"}
+        ):
+            raise SystemExit("unexpected corresponding-source bundle identity")
 
 
 def main() -> int:
@@ -109,7 +208,7 @@ def main() -> int:
         web / "legal" / "THIRD_PARTY.md",
         web / "legal" / "SOURCE.md",
         web / "legal" / "SOURCE-ARCHIVE.json",
-        web / "legal" / "kazstem-browser-corresponding-source-0.2.1.tar.gz",
+        web / "legal" / SOURCE_ARCHIVE_NAME,
         web / "resources" / "probe-ledger-summary.json",
     ]
     missing = [str(path) for path in required if not path.is_file()]
@@ -122,7 +221,7 @@ def main() -> int:
         artifact = web / "proofs" / record["path"]
         if artifact.stat().st_size != record["bytes"] or sha256(artifact) != record["sha256"]:
             raise SystemExit(f"compressed exact-ledger mismatch: {artifact}")
-    source_archive = web / "legal" / "kazstem-browser-corresponding-source-0.2.1.tar.gz"
+    source_archive = web / "legal" / SOURCE_ARCHIVE_NAME
     source_record = json.loads((web / "legal" / "SOURCE-ARCHIVE.json").read_text(encoding="utf-8"))
     if (
         source_record != {
@@ -133,6 +232,7 @@ def main() -> int:
         }
     ):
         raise SystemExit("corresponding-source archive size/SHA-256 mismatch")
+    verify_source_archive(package_root, source_archive)
     if args.output.exists():
         raise SystemExit(f"refusing to overwrite staging directory: {args.output}")
     shutil.copytree(web, args.output)

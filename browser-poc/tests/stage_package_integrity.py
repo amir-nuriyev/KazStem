@@ -4,10 +4,12 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import importlib.util
 import json
 from pathlib import Path
 import sys
+import tarfile
 import tempfile
 
 
@@ -31,8 +33,12 @@ def write_manifest(root: Path, files: dict[str, dict[str, object]]) -> Path:
         "branch": "codex/browser-pages-poc",
         "file_count": len(files),
         "files": files,
-        "freeze_time_publication_state": {"deployed": False, "pushed": False},
-        "schema": "kazstem.browser-isolated-package.v1",
+        "package_build_state": {
+            "distribution_scope": "public",
+            "pages_status": "published",
+            "repository_visibility": "public",
+        },
+        "schema": "kazstem.browser-isolated-package.v2",
         "self_excluded": "PACKAGE-MANIFEST.json",
         "total_bytes": sum(record["bytes"] for record in files.values()),
     }
@@ -49,6 +55,37 @@ def expect_failure(root: Path, fragment: str) -> None:
             raise AssertionError(f"expected {fragment!r} in {str(error)!r}") from error
     else:
         raise AssertionError("tampered package unexpectedly passed verification")
+
+
+def expect_source_failure(root: Path, archive: Path, fragment: str) -> None:
+    try:
+        MODULE.verify_source_archive(root, archive)
+    except SystemExit as error:
+        if fragment not in str(error):
+            raise AssertionError(f"expected {fragment!r} in {str(error)!r}") from error
+    else:
+        raise AssertionError("tampered source archive unexpectedly passed verification")
+
+
+def write_source_fixture(archive_path: Path, readme: bytes, *, extra: bool = False) -> None:
+    bundle_manifest = json.dumps({
+        "schema": "kazstem-browser-corresponding-source-v1",
+        "kazstem": {
+            "commit": "97cf865a0cef20ee78be1610bbe76ec6c7e52006",
+            "version": "0.2.1",
+        },
+        "apertium_kaz": {
+            "commit": "95c6dd0d8536ee69a7058634b03a3e82100b6b6e",
+        },
+    }).encode("utf-8")
+    with tarfile.open(archive_path, mode="w:gz") as archive:
+        for name, content in [
+            ("./SOURCE-BUNDLE-MANIFEST.json", bundle_manifest),
+            ("./browser-poc/README.md", readme),
+        ] + ([("./browser-poc/extra.js", b"extra\n")] if extra else []):
+            member = tarfile.TarInfo(name)
+            member.size = len(content)
+            archive.addfile(member, io.BytesIO(content))
 
 
 def main() -> int:
@@ -93,8 +130,50 @@ def main() -> int:
         expect_failure(root, "does not permit symlinks")
         assertions += 1
 
+        manifest.unlink()
+        manifest_target.unlink()
+        manifest = write_manifest(root, expected)
+        record = json.loads(manifest.read_text(encoding="utf-8"))
+        record["package_build_state"]["pages_status"] = "not-published"
+        manifest.write_text(json.dumps(record, sort_keys=True) + "\n", encoding="utf-8")
+        expect_failure(root, "invalid package-manifest identity or build state")
+        assertions += 1
+
+        record["package_build_state"]["pages_status"] = "published"
+        record["schema"] = "kazstem.browser-isolated-package.v1"
+        manifest.write_text(json.dumps(record, sort_keys=True) + "\n", encoding="utf-8")
+        expect_failure(root, "invalid package-manifest identity or build state")
+        assertions += 1
+
+    with tempfile.TemporaryDirectory(prefix="kazstem-source-integrity-") as directory:
+        fixture = Path(directory)
+        root = fixture / "browser-poc"
+        root.mkdir()
+        readme = root / "README.md"
+        readme.write_text("current\n", encoding="utf-8")
+        archive = fixture / "source.tar.gz"
+        write_source_fixture(archive, b"current\n")
+
+        MODULE.verify_source_archive(root, archive)
+        assertions += 1
+
+        readme.write_text("stale\n", encoding="utf-8")
+        expect_source_failure(root, archive, "stale corresponding-source browser member")
+        assertions += 1
+        readme.write_text("current\n", encoding="utf-8")
+
+        missing = root / "missing.js"
+        missing.write_text("missing\n", encoding="utf-8")
+        expect_source_failure(root, archive, "missing=['./browser-poc/missing.js']")
+        assertions += 1
+        missing.unlink()
+
+        write_source_fixture(archive, b"current\n", extra=True)
+        expect_source_failure(root, archive, "extra=['./browser-poc/extra.js']")
+        assertions += 1
+
     print(json.dumps({
-        "schema": "kazstem.browser-stage-package-integrity.v1",
+        "schema": "kazstem.browser-stage-package-integrity.v2",
         "assertions": assertions,
         "result": "pass",
     }, sort_keys=True))

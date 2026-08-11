@@ -4,15 +4,56 @@ from __future__ import annotations
 
 import json
 import hashlib
+import ctypes
+import math
+import ntpath
 import os
 from pathlib import Path
 import subprocess
+import sys
 from typing import Any
 import unicodedata
+
+from .platform_runtime import PlatformRuntimeError, resolve_platform_runtime
 
 
 class BackendError(RuntimeError):
     pass
+
+
+def _trusted_windows_loader_directories() -> tuple[str, str]:
+    """Resolve Windows/System32 from the kernel, never from ambient PATH."""
+
+    if sys.platform != "win32":
+        raise BackendError("trusted Windows loader directories requested off Windows")
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.GetSystemDirectoryW.argtypes = [ctypes.c_wchar_p, ctypes.c_uint]
+    kernel32.GetSystemDirectoryW.restype = ctypes.c_uint
+    kernel32.GetWindowsDirectoryW.argtypes = [ctypes.c_wchar_p, ctypes.c_uint]
+    kernel32.GetWindowsDirectoryW.restype = ctypes.c_uint
+
+    def query(function: Any, label: str) -> str:
+        buffer = ctypes.create_unicode_buffer(32768)
+        length = function(buffer, len(buffer))
+        if not length or length >= len(buffer):
+            raise BackendError(
+                f"cannot resolve trusted {label} directory: {ctypes.get_last_error()}"
+            )
+        return ntpath.normpath(buffer.value)
+
+    return (
+        query(kernel32.GetSystemDirectoryW, "System32"),
+        query(kernel32.GetWindowsDirectoryW, "Windows"),
+    )
+
+
+def _helper_working_directory(executable: str | Path) -> str | None:
+    if sys.platform != "win32":
+        return None
+    path = Path(executable)
+    if not path.is_absolute():
+        raise BackendError("Windows helper executable must be an absolute path")
+    return str(path.parent)
 
 
 APERTIUM_RESERVED = frozenset("\\^$/<>{}[]@#*+")
@@ -25,8 +66,37 @@ CONTROL_SUPERBLANKS = {
     "\r": "[QAZMORPH-CARRIAGE-RETURN]",
 }
 PROTECTED_CHARACTERS = frozenset("\\^$/<>{}[]@#*+~|=&`")
+LOADER_OVERRIDE_VARIABLES = (
+    "LD_LIBRARY_PATH",
+    "LD_PRELOAD",
+    "LD_AUDIT",
+    "DYLD_LIBRARY_PATH",
+    "DYLD_INSERT_LIBRARIES",
+    "DYLD_FRAMEWORK_PATH",
+    "DYLD_FALLBACK_FRAMEWORK_PATH",
+    "DYLD_FALLBACK_LIBRARY_PATH",
+    "DYLD_IMAGE_SUFFIX",
+    "DYLD_ROOT_PATH",
+    "DYLD_SHARED_REGION",
+    "DYLD_PRINT_TO_FILE",
+)
+LOADER_OVERRIDE_PREFIXES = ("LD_", "DYLD_")
+GLIBC_TUNABLES_VARIABLE = "GLIBC_TUNABLES"
 RESOURCE_MANIFEST_V2 = "qazmorph-resource-manifest-v2"
 RESOURCE_MANIFEST_V3 = "qazmorph-resource-manifest-v3"
+RESOURCE_MANIFEST_V4 = "qazmorph-resource-manifest-v4"
+GUESSER_FINITE_SCHEMA_V1 = "qazmorph-guesser-finiteness-v1"
+GUESSER_FINITE_SCHEMA_V2 = "qazmorph-guesser-finiteness-v2"
+PRODUCTIVE_GENERATOR_FINITE_SCHEMA_V2 = (
+    "qazmorph-productive-generator-finiteness-v2"
+)
+# The v1 gate predates the stronger bundle-independent verifier contract.  Its
+# result is trusted only as part of the exact, content-addressed f03e release
+# whose proof metadata and resource hashes were reviewed together.
+PINNED_LEGACY_V1_BUNDLE_ID = (
+    "f03e703d3e2a67044a7d91fd7d575b92cb4e61aa782fb67cff91b0a5ff0ebd5a"
+)
+GENERATION_QUERY_BYTE_LIMIT = 4096
 RESOURCE_FILES_BY_SCHEMA = {
     RESOURCE_MANIFEST_V2: frozenset(
         {
@@ -38,13 +108,78 @@ RESOURCE_FILES_BY_SCHEMA = {
     ),
     RESOURCE_MANIFEST_V3: frozenset(
         {
-        "kaz.automorf.hfstol",
-        "kaz.autogen.hfstol",
-        "kaz.guesser.automorf.hfstol",
-        "kaz.rlx.bin",
+            "kaz.automorf.hfstol",
+            "kaz.autogen.hfstol",
+            "kaz.guesser.automorf.hfstol",
+            "kaz.rlx.bin",
+        }
+    ),
+    RESOURCE_MANIFEST_V4: frozenset(
+        {
+            "kaz.automorf.hfstol",
+            "kaz.autogen.hfstol",
+            "kaz.guesser.automorf.hfstol",
+            "kaz.guesser.autogen.hfstol",
+            "kaz.rlx.bin",
         }
     ),
 }
+
+
+def _integrity_seal_status(
+    *,
+    verified: bool,
+    manifest_read_only: bool,
+    root_read_only: bool,
+    writable_entries: int,
+    writable_directories: int,
+    content_rehashed: bool,
+) -> dict[str, Any]:
+    """Describe the host-appropriate integrity seal for an inventory.
+
+    POSIX mode bits can make both files and directories read-only and remain
+    part of the existing official-release contract.  Windows directory
+    ``READONLY`` attributes do not deny creation or replacement, and ZIP ACLs
+    are not portable.  Treating their synthetic ``st_mode`` bits as a POSIX
+    seal would therefore be false assurance.  On Windows the equivalent gate
+    is an exact, complete inventory whose regular files were freshly rehashed;
+    this also deliberately disables the process-local hash cache.
+    """
+
+    sealed_read_only = bool(
+        verified
+        and manifest_read_only
+        and root_read_only
+        and writable_entries == 0
+        and writable_directories == 0
+    )
+    if sys.platform == "win32":
+        return {
+            "seal_model": "windows-complete-inventory-force-rehash-v1",
+            "directory_modes_enforced": False,
+            "sealed_read_only": False,
+            "integrity_seal_verified": bool(verified and content_rehashed),
+        }
+    return {
+        "seal_model": "posix-read-only-complete-inventory-v1",
+        "directory_modes_enforced": True,
+        "sealed_read_only": sealed_read_only,
+        "integrity_seal_verified": sealed_read_only,
+    }
+
+
+def _runtime_executable_file_available(candidate: Path) -> bool:
+    """Apply the host-appropriate pre-execution file availability check."""
+
+    if not candidate.is_file():
+        return False
+    if sys.platform == "win32":
+        # os.access(..., X_OK) reflects POSIX mode emulation inconsistently for
+        # an extracted Windows ZIP and is not the Windows execution contract.
+        # Require a regular, non-link PE launcher; manifest/hash verification
+        # and an actual version execution are enforced by the caller.
+        return not candidate.is_symlink() and candidate.suffix.casefold() == ".exe"
+    return os.access(candidate, os.X_OK)
 
 
 def _protected_sentinel(character: str) -> str:
@@ -166,7 +301,60 @@ def _candidate_resource_dirs(explicit: str | os.PathLike[str] | None) -> list[Pa
     return candidates
 
 
+def _v1_guesser_gate_sections(
+    manifest: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]] | None:
+    """Return a structurally valid legacy-v1 proof, never a partial section.
+
+    A content-addressed but previously unknown v1 bundle may still be used for
+    dictionary analysis/generation as a nonofficial rollback.  It must not get
+    that rollback merely by placing the string ``finiteness-v1`` above missing
+    or type-confused proof sections, however.
+    """
+
+    if manifest.get("schema") != RESOURCE_MANIFEST_V3:
+        return None
+    try:
+        result = manifest["build"]["verification"][
+            "productive_guesser_finite_valued"
+        ]["result"]
+        graph = result["graph"]
+        probes = result["no_cap_probes"]
+        optimized = result["optimized_runtime"]
+    except (KeyError, TypeError):
+        return None
+    if not all(
+        isinstance(section, dict)
+        for section in (result, graph, probes, optimized)
+    ):
+        return None
+
+    def boolean(value: object) -> bool:
+        return isinstance(value, bool)
+
+    def nonnegative_integer(value: object) -> bool:
+        return (
+            isinstance(value, int)
+            and not isinstance(value, bool)
+            and value >= 0
+        )
+
+    if not (
+        result.get("schema") == GUESSER_FINITE_SCHEMA_V1
+        and boolean(graph.get("reachable_input_epsilon_cycle"))
+        and boolean(probes.get("all_lemmas_match_bounded_root_relation"))
+        and nonnegative_integer(probes.get("cycle_markers"))
+        and boolean(optimized.get("full_relation_equivalent_to_standard"))
+        and boolean(optimized.get("candidate_sets_equal_to_standard"))
+        and nonnegative_integer(optimized.get("cycle_markers"))
+    ):
+        return None
+    return result, graph, probes, optimized
+
+
 def _has_verified_v3_guesser_gate(manifest: dict[str, Any]) -> bool:
+    """Accept the pinned v1 exception or the stronger v2 bounded-root gate."""
+
     try:
         result = manifest["build"]["verification"][
             "productive_guesser_finite_valued"
@@ -176,19 +364,254 @@ def _has_verified_v3_guesser_gate(manifest: dict[str, Any]) -> bool:
         optimized = result["optimized_runtime"]
     except (KeyError, TypeError):
         return False
+    if (
+        manifest.get("schema") not in {RESOURCE_MANIFEST_V3, RESOURCE_MANIFEST_V4}
+        or not all(
+            isinstance(section, dict)
+            for section in (result, graph, probes, optimized)
+        )
+    ):
+        return False
 
     def zero(value: object) -> bool:
         return isinstance(value, int) and not isinstance(value, bool) and value == 0
 
-    return (
-        result.get("schema") == "qazmorph-guesser-finiteness-v1"
-        and graph.get("reachable_input_epsilon_cycle") is False
+    common = (
+        graph.get("reachable_input_epsilon_cycle") is False
         and probes.get("all_lemmas_match_bounded_root_relation") is True
         and zero(probes.get("cycle_markers"))
         and optimized.get("full_relation_equivalent_to_standard") is True
         and optimized.get("candidate_sets_equal_to_standard") is True
         and zero(optimized.get("cycle_markers"))
     )
+    schema = result.get("schema")
+    if schema == GUESSER_FINITE_SCHEMA_V1:
+        return bool(
+            common
+            and manifest.get("schema") == RESOURCE_MANIFEST_V3
+            and manifest.get("bundle_id") == PINNED_LEGACY_V1_BUNDLE_ID
+        )
+    if schema != GUESSER_FINITE_SCHEMA_V2 or not common:
+        return False
+    try:
+        baseline = result["baseline_relation"]
+        bounded_roots = probes["bounded_root_relation"]
+        syncope = bounded_roots["noun_high_vowel_syncope"]
+        loan = bounded_roots["loan_back_harmony"]
+    except (KeyError, TypeError):
+        return False
+    if not all(
+        isinstance(section, dict)
+        for section in (baseline, bounded_roots, syncope, loan)
+    ):
+        return False
+    return (
+        baseline.get("baseline_subset_of_final") is True
+        and zero(probes.get("forbidden_readings_observed"))
+        and isinstance(probes.get("forbidden_readings_checked"), int)
+        and not isinstance(probes.get("forbidden_readings_checked"), bool)
+        and probes["forbidden_readings_checked"] > 0
+        and isinstance(probes.get("probes"), int)
+        and not isinstance(probes.get("probes"), bool)
+        and probes["probes"] >= 362
+        and isinstance(probes.get("deterministic_adversarial_probes"), int)
+        and not isinstance(probes.get("deterministic_adversarial_probes"), bool)
+        and probes["deterministic_adversarial_probes"] >= 256
+        and probes.get("tracked_readings_missing") == []
+        and bounded_roots.get("unbounded_input_epsilon_root_templates") is False
+        and syncope.get("noun_only") is True
+        and syncope.get("requires_nonempty_surface_suffix") is True
+        and loan.get("noun_only") is True
+        and loan.get("lemma_suffix") == "кубок"
+        and loan.get("generic_back_harmony_g_to_k") is False
+    )
+
+
+def _v3_guesser_gate_schema(manifest: dict[str, Any]) -> str | None:
+    try:
+        result = manifest["build"]["verification"][
+            "productive_guesser_finite_valued"
+        ]["result"]
+    except (KeyError, TypeError):
+        return None
+    if not isinstance(result, dict):
+        return None
+    schema = result.get("schema")
+    return schema if isinstance(schema, str) else None
+
+
+def _guesser_safety_reason(manifest: dict[str, Any], *, verified: bool) -> str:
+    resource_schema = manifest.get("schema")
+    if resource_schema not in {RESOURCE_MANIFEST_V3, RESOURCE_MANIFEST_V4}:
+        return "legacy resource v2 has no verifiable finite-guesser gate"
+    gate_schema = _v3_guesser_gate_schema(manifest)
+    if verified and gate_schema == GUESSER_FINITE_SCHEMA_V1:
+        return "pinned legacy f03e resource v3 embeds its reviewed finiteness-v1 gate"
+    if verified:
+        return (
+            f"resource {str(resource_schema).rsplit('-', 1)[-1]} embeds the required "
+            "finiteness-v2 optimized-guesser gate"
+        )
+    if gate_schema == GUESSER_FINITE_SCHEMA_V1:
+        return (
+            "resource v3 finiteness-v1 proof is trusted only for pinned legacy "
+            f"bundle {PINNED_LEGACY_V1_BUNDLE_ID}; productive guesser disabled"
+        )
+    return "resource finite-guesser proof is missing or invalid"
+
+
+def _has_verified_v4_productive_generator_gate(
+    manifest: dict[str, Any],
+) -> bool:
+    """Validate the complete finite inverse and installed-artifact proof."""
+
+    if manifest.get("schema") != RESOURCE_MANIFEST_V4:
+        return False
+    try:
+        result = manifest["build"]["verification"][
+            "productive_generator_finite_valued"
+        ]["result"]
+        graph = result["graph"]
+        inverse = result["inverse_relation"]
+        optimized = result["optimized_runtime"]
+        probes = result["inversion_probes"]
+        direction_relation = result["generation_direction_relation"]
+        direction_probes = result["directionality_probes"]
+        installed = result["installed_artifacts"]
+        combined = result["combined_generation_subset"]
+        inputs = result["inputs"]
+        files = manifest["files"]
+        build_inputs = manifest["build"]["inputs"]
+    except (KeyError, TypeError):
+        return False
+    if not all(
+        isinstance(section, dict)
+        for section in (
+            result,
+            graph,
+            inverse,
+            optimized,
+            probes,
+            direction_relation,
+            direction_probes,
+            installed,
+            combined,
+            inputs,
+            files,
+            build_inputs,
+        )
+    ):
+        return False
+
+    def positive(value: object) -> bool:
+        return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+    def zero(value: object) -> bool:
+        return isinstance(value, int) and not isinstance(value, bool) and value == 0
+
+    expected_inputs = {
+        "generation_safe_productive_analyzer_standard",
+        "full_productive_analyzer_standard",
+        "full_productive_analyzer_optimized",
+        "productive_generator_standard",
+        "productive_generator_optimized",
+        "dictionary_generator_standard",
+        "dictionary_generator_optimized",
+        "dictionary_analyzer_lexical_to_surface_standard",
+        "dictionary_analyzer_surface_to_lexical_optimized",
+        "baseline_probes",
+        "direction_probes",
+    }
+    return bool(
+        result.get("schema") == PRODUCTIVE_GENERATOR_FINITE_SCHEMA_V2
+        and graph.get("reachable_input_epsilon_cycle") is False
+        and inverse.get("generator_inverse_equals_productive_analyzer") is True
+        and inverse.get("productive_analyzer_minus_generator_inverse_empty") is True
+        and inverse.get("generator_inverse_minus_productive_analyzer_empty") is True
+        and optimized.get("full_relation_equivalent_to_standard") is True
+        and optimized.get("standard_minus_optimized_roundtrip_empty") is True
+        and optimized.get("optimized_roundtrip_minus_standard_empty") is True
+        and optimized.get("candidate_sets_equal_to_standard") is True
+        and optimized.get("standard_optimized_mismatches") == []
+        and zero(optimized.get("cycle_markers"))
+        and zero(optimized.get("cap_markers"))
+        and positive(optimized.get("queries"))
+        and probes.get("required_pairs_missing") == []
+        and positive(probes.get("required_pairs_checked"))
+        and probes["required_pairs_checked"] >= 64
+        and positive(probes.get("forbidden_pairs_checked"))
+        and zero(probes.get("forbidden_pairs_observed"))
+        and probes.get("forbidden_pairs_found") == []
+        and probes.get("all_queries_keyed") is True
+        and zero(probes.get("cycle_markers"))
+        and zero(probes.get("cap_markers"))
+        and direction_relation.get(
+            "generation_safe_analyzer_subset_of_full_analyzer"
+        )
+        is True
+        and direction_relation.get("generation_safe_minus_full_empty") is True
+        and direction_relation.get("full_minus_generation_safe_nonempty") is True
+        and direction_probes.get("required_pairs_checked") == 3
+        and direction_probes.get("required_pairs_missing") == []
+        and direction_probes.get("forbidden_pairs_checked") == 3
+        and zero(direction_probes.get("forbidden_pairs_observed"))
+        and direction_probes.get("forbidden_pairs_found") == []
+        and direction_probes.get("canonical_short_instrumental_only") is True
+        and direction_probes.get(
+            "analysis_only_adjective_comparative_excluded"
+        )
+        is True
+        and direction_probes.get("analysis_only_verb_future_plan_excluded") is True
+        and installed.get("all_installed_relations_equivalent_to_standard") is True
+        and all(
+            isinstance(installed.get(name), dict)
+            and installed[name].get("full_relation_equivalent_to_standard") is True
+            and installed[name].get(
+                "standard_minus_optimized_roundtrip_empty"
+            )
+            is True
+            and installed[name].get(
+                "optimized_roundtrip_minus_standard_empty"
+            )
+            is True
+            for name in (
+                "dictionary_generator",
+                "dictionary_analyzer_surface_to_lexical",
+                "full_productive_analyzer",
+            )
+        )
+        and set(inputs) == expected_inputs
+        and inputs.get("productive_generator_optimized")
+        == files.get("kaz.guesser.autogen.hfstol")
+        and inputs.get("dictionary_generator_optimized")
+        == files.get("kaz.autogen.hfstol")
+        and inputs.get("dictionary_analyzer_surface_to_lexical_optimized")
+        == files.get("kaz.automorf.hfstol")
+        and inputs.get("full_productive_analyzer_optimized")
+        == files.get("kaz.guesser.automorf.hfstol")
+        and inputs.get("baseline_probes")
+        == build_inputs.get("scripts/guesser_regression_probes.json")
+        and inputs.get("direction_probes")
+        == build_inputs.get("scripts/generator_regression_probes.json")
+        and combined.get(
+            "dictionary_and_productive_generator_subset_of_analyzers"
+        )
+        is True
+        and combined.get("generated_minus_accepted_empty") is True
+    )
+
+
+def _productive_generator_safety_reason(
+    manifest: dict[str, Any], *, verified: bool
+) -> str:
+    if manifest.get("schema") != RESOURCE_MANIFEST_V4:
+        return "resource v2/v3 is a functional rollback without productive generation"
+    if verified:
+        return (
+            "resource v4 embeds the exact-inverse, finite-valued optimized "
+            "productive-generator gate"
+        )
+    return "resource v4 productive-generator proof is missing or invalid"
 
 
 class FSTBackend:
@@ -204,25 +627,36 @@ class FSTBackend:
         self.grammar_path = self.resource_dir / "kaz.rlx.bin"
         self.manifest = self._read_manifest()
         self._resource_inventory = self._verify_resource_inventory()
-        self.guesser_optimized = self.manifest["schema"] == RESOURCE_MANIFEST_V3
+        self.guesser_optimized = self.manifest["schema"] in {
+            RESOURCE_MANIFEST_V3,
+            RESOURCE_MANIFEST_V4,
+        }
         self.guesser_format = "optimized" if self.guesser_optimized else "standard"
         self.guesser_verified_finite = _has_verified_v3_guesser_gate(self.manifest)
         self.guesser_productive_safe = self.guesser_verified_finite
-        self.guesser_safety_reason = (
-            "resource v3 embeds the required finite optimized-guesser gate"
-            if self.guesser_verified_finite
-            else (
-                "resource v3 finite-guesser proof is missing or invalid"
-                if self.manifest["schema"] == RESOURCE_MANIFEST_V3
-                else "legacy resource v2 has no verifiable finite-guesser gate"
-            )
+        self.guesser_safety_reason = _guesser_safety_reason(
+            self.manifest, verified=self.guesser_verified_finite
         )
         self.guesser_path = self.resource_dir / (
             "kaz.guesser.automorf.hfstol"
             if self.guesser_optimized
             else "kaz.guesser.automorf.hfst"
         )
-        self.toolchain_dir = self._resolve_toolchain_dir(self.manifest)
+        self.generator_path = self.resource_dir / "kaz.autogen.hfstol"
+        self.productive_generator_path = (
+            self.resource_dir / "kaz.guesser.autogen.hfstol"
+        )
+        self.productive_generator_verified_finite = (
+            _has_verified_v4_productive_generator_gate(self.manifest)
+        )
+        self.productive_generator_safe = self.productive_generator_verified_finite
+        self.productive_generator_safety_reason = (
+            _productive_generator_safety_reason(
+                self.manifest,
+                verified=self.productive_generator_verified_finite,
+            )
+        )
+        self._select_runtime_toolchain()
         self.toolchain_manifest = self._read_bound_toolchain_manifest()
         self._toolchain_inventory = self._verify_bound_toolchain_inventory()
         self._executable_origins: dict[str, str] = {}
@@ -234,6 +668,30 @@ class FSTBackend:
         self.hfst_optimized_lookup = self._find_executable(
             "hfst-optimized-lookup", "QAZMORPH_HFST_OPTIMIZED_LOOKUP", required=False
         )
+
+    def _select_runtime_toolchain(self) -> None:
+        """Select a locked native runtime or retain the resource build binding."""
+
+        original = self.manifest.get("build", {}).get("toolchain")
+        if not isinstance(original, dict):
+            raise BackendError("Resource manifest has no valid toolchain binding")
+        self.resource_build_toolchain_binding = dict(original)
+        try:
+            detached = resolve_platform_runtime(
+                self.resource_dir, str(self.manifest.get("bundle_id", ""))
+            )
+        except PlatformRuntimeError as exc:
+            raise BackendError(str(exc)) from exc
+        if detached is None:
+            self.toolchain_dir = self._resolve_toolchain_dir(self.manifest)
+            self.toolchain_binding = dict(original)
+            self.toolchain_origin = "resource-bound-toolchain"
+            self.platform_runtime_lock_entry = None
+            return
+        self.toolchain_dir = detached.directory
+        self.toolchain_binding = dict(detached.binding)
+        self.toolchain_origin = detached.origin
+        self.platform_runtime_lock_entry = dict(detached.lock_entry)
 
     @staticmethod
     def _find_resource_dir(explicit: str | os.PathLike[str] | None) -> Path:
@@ -294,9 +752,27 @@ class FSTBackend:
             manifest.get("build"), dict
         ):
             raise BackendError(f"Resource manifest provenance is incomplete: {path}")
-        if schema == RESOURCE_MANIFEST_V3 and not _has_verified_v3_guesser_gate(manifest):
+        if schema == RESOURCE_MANIFEST_V4 and not _has_verified_v3_guesser_gate(
+            manifest
+        ):
             raise BackendError(
-                f"Resource v3 finite-guesser verification is missing or invalid: {path}"
+                f"Resource v4 finite-guesser verification is missing or invalid: {path}"
+            )
+        if schema == RESOURCE_MANIFEST_V3 and not _has_verified_v3_guesser_gate(manifest):
+            # Structurally complete v1 proofs from unknown content-addressed
+            # bundles remain usable only for nonproductive rollback.  Missing
+            # or malformed proof sections are resource-integrity failures.
+            if _v1_guesser_gate_sections(manifest) is None:
+                raise BackendError(
+                    f"Resource v3 finite-guesser verification is missing or malformed: {path}"
+                )
+        if (
+            schema == RESOURCE_MANIFEST_V4
+            and not _has_verified_v4_productive_generator_gate(manifest)
+        ):
+            raise BackendError(
+                "Resource v4 productive-generator verification is missing or "
+                f"invalid: {path}"
             )
         for name, metadata in files.items():
             resource = self.resource_dir / name
@@ -415,12 +891,13 @@ class FSTBackend:
             and artifacts_match
             and regular_artifacts == len(required_files)
         )
-        sealed_read_only = bool(
-            verified
-            and root_read_only
-            and manifest_read_only
-            and writable_entries == 0
-            and writable_directories == 0
+        seal = _integrity_seal_status(
+            verified=verified,
+            manifest_read_only=manifest_read_only,
+            root_read_only=root_read_only,
+            writable_entries=writable_entries,
+            writable_directories=writable_directories,
+            content_rehashed=True,
         )
         return {
             "verified": verified,
@@ -435,7 +912,7 @@ class FSTBackend:
             "writable_directories": writable_directories,
             "missing_entries": missing_entries,
             "unexpected_entries": unexpected_entries,
-            "sealed_read_only": sealed_read_only,
+            **seal,
             "verification_scope": "complete resource bundle",
         }
 
@@ -513,7 +990,11 @@ class FSTBackend:
     def _verify_current_toolchain_manifest(self) -> dict[str, Any]:
         """Re-read the bound manifest and verify every recorded identity."""
 
-        binding = self.manifest.get("build", {}).get("toolchain")
+        binding = getattr(
+            self,
+            "toolchain_binding",
+            self.manifest.get("build", {}).get("toolchain"),
+        )
         expected = binding.get("manifest") if isinstance(binding, dict) else None
         expected_bundle = binding.get("bundle_id") if isinstance(binding, dict) else None
         if (
@@ -522,7 +1003,7 @@ class FSTBackend:
             or not isinstance(expected.get("sha256"), str)
             or not isinstance(expected_bundle, str)
         ):
-            raise BackendError("Resource manifest has no valid toolchain binding")
+            raise BackendError("Active runtime has no valid manifest binding")
 
         path = self.toolchain_dir / "manifest.json"
         try:
@@ -697,7 +1178,7 @@ class FSTBackend:
             bool(path.stat().st_mode & 0o222) for path in directories
         )
         root_read_only = not bool(root_stat.st_mode & 0o222)
-        sealed_read_only = (
+        posix_sealed_read_only = bool(
             manifest_read_only
             and root_read_only
             and writable_entries == 0
@@ -707,7 +1188,8 @@ class FSTBackend:
         frozen_fingerprint = tuple(fingerprint)
         content_rehashed = bool(
             force_rehash
-            or not sealed_read_only
+            or sys.platform == "win32"
+            or not posix_sealed_read_only
             or self._verified_toolchain_inventories.get(cache_key) != frozen_fingerprint
         )
         if content_rehashed:
@@ -717,10 +1199,19 @@ class FSTBackend:
                     raise BackendError(
                         f"Bound toolchain file checksum failed: {relative_name}"
                     )
-            if sealed_read_only:
+            if posix_sealed_read_only and sys.platform != "win32":
                 self._verified_toolchain_inventories[cache_key] = frozen_fingerprint
             else:
                 self._verified_toolchain_inventories.pop(cache_key, None)
+
+        seal = _integrity_seal_status(
+            verified=True,
+            manifest_read_only=manifest_read_only,
+            root_read_only=root_read_only,
+            writable_entries=writable_entries,
+            writable_directories=writable_directories,
+            content_rehashed=content_rehashed,
+        )
 
         return {
             "verified": True,
@@ -732,7 +1223,7 @@ class FSTBackend:
             "root_read_only": root_read_only,
             "writable_entries": writable_entries,
             "writable_directories": writable_directories,
-            "sealed_read_only": sealed_read_only,
+            **seal,
             "verification_scope": "complete extracted toolchain bundle",
             "force_rehash": force_rehash,
             "content_rehashed": content_rehashed,
@@ -741,19 +1232,60 @@ class FSTBackend:
 
     def _environment(self) -> dict[str, str]:
         environment = os.environ.copy()
+        self._ambient_library_path = environment.get("LD_LIBRARY_PATH")
         self._ambient_ld_preload = environment.get("LD_PRELOAD")
         self._ambient_ld_audit = environment.get("LD_AUDIT")
+        self._ambient_dyld_library_path = environment.get("DYLD_LIBRARY_PATH")
+        self._ambient_dyld_insert_libraries = environment.get(
+            "DYLD_INSERT_LIBRARIES"
+        )
+        self._ambient_loader_overrides = {
+            key: value
+            for key, value in environment.items()
+            if key.startswith(LOADER_OVERRIDE_PREFIXES)
+        }
+        self._ambient_glibc_tunables_present = GLIBC_TUNABLES_VARIABLE in environment
+        self._ambient_glibc_tunables = environment.get(GLIBC_TUNABLES_VARIABLE)
+        for key in self._ambient_loader_overrides:
+            environment.pop(key, None)
+        environment.pop(GLIBC_TUNABLES_VARIABLE, None)
         for key in ("CG3_DEFAULT", "CG3_OVERRIDE"):
             environment.pop(key, None)
+        if sys.platform == "win32":
+            path_keys = [key for key in environment if key.upper() == "PATH"]
+            ambient_path = environment.get(path_keys[0]) if path_keys else None
+            trusted = {
+                ntpath.normcase(ntpath.normpath(path))
+                for path in _trusted_windows_loader_directories()
+            }
+            ambient_entries = {
+                ntpath.normcase(ntpath.normpath(path))
+                for path in (ambient_path or "").split(";")
+                if path
+            }
+            self._ambient_windows_path_present = bool(ambient_path)
+            self._ambient_windows_path_risk = len(path_keys) > 1 or bool(
+                ambient_entries - trusted
+            )
+            # Helpers are selected by absolute, manifest-bound paths.  Empty
+            # PATH prevents a missing adjacent dependency from falling through
+            # to a caller-controlled directory.
+            for key in path_keys:
+                environment.pop(key, None)
+            environment["PATH"] = ""
+            return environment
+        if not sys.platform.startswith("linux"):
+            return environment
         prefixes = (
             self.toolchain_dir / "usr" / "lib" / "x86_64-linux-gnu",
             self.toolchain_dir / "usr" / "lib",
         )
         library_path = [str(path) for path in prefixes if path.is_dir()]
-        existing = environment.get("LD_LIBRARY_PATH")
-        self._ambient_library_path = existing
-        if existing:
-            library_path.append(existing)
+        self._bound_linux_library_paths = [
+            path.relative_to(self.toolchain_dir).as_posix()
+            for path in prefixes
+            if path.is_dir()
+        ]
         if library_path:
             environment["LD_LIBRARY_PATH"] = os.pathsep.join(library_path)
         return environment
@@ -762,7 +1294,8 @@ class FSTBackend:
         explicit = os.environ.get(env_name)
         if explicit:
             candidate = Path(explicit).expanduser()
-            if candidate.is_file() and os.access(candidate, os.X_OK):
+            if _runtime_executable_file_available(candidate):
+                self._probe_windows_executable(name, candidate, command=None)
                 self._executable_origins[name] = f"explicit:{env_name}"
                 self._executable_verified[name] = False
                 return str(candidate)
@@ -808,16 +1341,70 @@ class FSTBackend:
             or expected_hash != file_record["sha256"]
         ):
             raise BackendError(f"Bound toolchain command inventory is invalid: {name!r}")
-        if not candidate.is_file() or not os.access(candidate, os.X_OK):
+        if not _runtime_executable_file_available(candidate):
             raise BackendError(f"Bound toolchain executable is unavailable: {candidate}")
         if candidate.stat().st_size != file_record["bytes"]:
             raise BackendError(f"Bound toolchain executable size verification failed: {name}")
         digest = hashlib.sha256(candidate.read_bytes()).hexdigest()
         if digest != expected_hash:
             raise BackendError(f"Bound toolchain executable checksum failed: {name}")
-        self._executable_origins[name] = "resource-bound-toolchain"
+        self._probe_windows_executable(name, candidate, command=command)
+        self._executable_origins[name] = getattr(
+            self, "toolchain_origin", "resource-bound-toolchain"
+        )
         self._executable_verified[name] = True
         return str(candidate)
+
+    def _probe_windows_executable(
+        self,
+        name: str,
+        candidate: Path,
+        *,
+        command: dict[str, Any] | None,
+    ) -> None:
+        """Execute the real Windows helper before accepting it as available."""
+
+        if sys.platform != "win32":
+            return
+        version_args = command.get("version_args") if command is not None else None
+        if not isinstance(version_args, list) or any(
+            not isinstance(argument, str) or not argument for argument in version_args
+        ):
+            version_args = ["-v"] if name == "cg-proc" else ["--version"]
+        environment = dict(self.environment)
+        environment.update({"LC_ALL": "C", "LANG": "C", "TZ": "UTC"})
+        try:
+            completed = subprocess.run(
+                [str(candidate), *version_args],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                env=environment,
+                cwd=_helper_working_directory(candidate),
+                timeout=10.0,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise BackendError(
+                f"Windows runtime executable probe failed for {name}: {exc}"
+            ) from exc
+        if len(completed.stdout) > 1024 * 1024:
+            raise BackendError(
+                f"Windows runtime executable probe output is unbounded: {name}"
+            )
+        output = "\n".join(
+            line.rstrip()
+            for line in completed.stdout.decode("utf-8", errors="replace").splitlines()
+        ).strip()
+        output = output.replace(str(candidate), candidate.name)
+        if completed.returncode or not output:
+            raise BackendError(
+                f"Windows runtime executable probe exited {completed.returncode}: {name}"
+            )
+        expected = command.get("version_output") if command is not None else None
+        if isinstance(expected, str) and output != expected:
+            raise BackendError(
+                f"Windows runtime executable version output changed: {name}"
+            )
 
     @property
     def resource_version(self) -> str:
@@ -850,6 +1437,7 @@ class FSTBackend:
                     **dict(self._toolchain_inventory),
                     "verified": False,
                     "sealed_read_only": False,
+                    "integrity_seal_verified": False,
                     "force_rehash": True,
                     "content_rehashed": True,
                     "error": verification_error,
@@ -859,6 +1447,7 @@ class FSTBackend:
                 **dict(self._toolchain_inventory),
                 "verified": False,
                 "sealed_read_only": False,
+                "integrity_seal_verified": False,
                 "force_rehash": True,
                 "content_rehashed": False,
                 "error": verification_error,
@@ -867,6 +1456,10 @@ class FSTBackend:
         fresh_toolchain_verified = bool(
             toolchain.get("verified") and inventory.get("verified")
         )
+        toolchain_origin = getattr(
+            self, "toolchain_origin", "resource-bound-toolchain"
+        )
+        bound_origins = {"resource-bound-toolchain", "platform-runtime-lock"}
         executables: dict[str, dict[str, int | str | bool] | None] = {}
         unverified_overrides: set[str] = set()
         bound_executable_errors: list[str] = []
@@ -884,7 +1477,7 @@ class FSTBackend:
             verified = bool(
                 initially_verified
                 and (
-                    origin != "resource-bound-toolchain"
+                    origin not in bound_origins
                     or fresh_toolchain_verified
                 )
             )
@@ -896,10 +1489,10 @@ class FSTBackend:
                         digest.update(block)
                     stat = os.fstat(stream.fileno())
                 executable_error: str | None = None
-                if origin == "resource-bound-toolchain":
+                if origin in bound_origins:
                     try:
                         relative_name = path.relative_to(
-                            self.toolchain_dir
+                            self.toolchain_dir.resolve()
                         ).as_posix()
                     except ValueError:
                         relative_name = ""
@@ -923,6 +1516,16 @@ class FSTBackend:
                     "sha256": digest.hexdigest(),
                     "origin": origin,
                     "verified": verified,
+                    "os_access_x_ok": os.access(path, os.X_OK),
+                    "availability_contract": (
+                        (
+                            "regular-exe-manifest-hash-successful-version-execution"
+                            if origin in bound_origins
+                            else "regular-exe-successful-version-execution-unverified-override"
+                        )
+                        if sys.platform == "win32"
+                        else "posix-regular-file-and-x-ok"
+                    ),
                 }
                 if executable_error is not None:
                     executable["error"] = executable_error
@@ -934,10 +1537,10 @@ class FSTBackend:
                     "verified": False,
                     "error": "runtime executable is unavailable during provenance verification",
                 }
-                if origin == "resource-bound-toolchain":
+                if origin in bound_origins:
                     bound_executable_errors.append(name)
             executables[name] = executable
-            if not verified and origin != "resource-bound-toolchain":
+            if not verified and origin not in bound_origins:
                 unverified_overrides.add(origin)
 
         if bound_executable_errors:
@@ -955,6 +1558,7 @@ class FSTBackend:
                 **inventory,
                 "verified": False,
                 "sealed_read_only": False,
+                "integrity_seal_verified": False,
                 "error": verification_error,
             }
 
@@ -965,13 +1569,14 @@ class FSTBackend:
             )
             and not unverified_overrides
         )
+        resource_schema_label = str(self.manifest["schema"]).rsplit("-", 1)[-1]
         non_official_reasons = [
             f"unverified runtime executable override: {origin}"
             for origin in sorted(unverified_overrides)
         ]
         if verification_error is not None:
             non_official_reasons.append(
-                f"bound toolchain runtime verification failed: {verification_error}"
+                f"bound runtime verification failed: {verification_error}"
             )
         if self.manifest["schema"] == RESOURCE_MANIFEST_V2:
             non_official_reasons.append(
@@ -980,70 +1585,225 @@ class FSTBackend:
         else:
             if not self.guesser_verified_finite:
                 non_official_reasons.append(
-                    "resource v3 has no verified finite-guesser proof"
+                    f"resource {resource_schema_label} has no verified "
+                    "finite-guesser proof: "
+                    + self.guesser_safety_reason
                 )
-            if verification_error is None and not inventory.get("sealed_read_only"):
+            if (
+                self.manifest["schema"] == RESOURCE_MANIFEST_V4
+                and not self.productive_generator_verified_finite
+            ):
                 non_official_reasons.append(
-                    "resource v3 bound toolchain is not sealed read-only"
+                    "resource v4 has no verified productive-generator proof: "
+                    + self.productive_generator_safety_reason
                 )
+            if verification_error is None and not inventory.get(
+                "integrity_seal_verified",
+                inventory.get("sealed_read_only"),
+            ):
+                if sys.platform == "win32":
+                    non_official_reasons.append(
+                        (
+                            f"resource {resource_schema_label} bound toolchain "
+                            "integrity seal is not verified"
+                            if toolchain_origin == "resource-bound-toolchain"
+                            else f"resource {resource_schema_label} active platform "
+                            "runtime integrity seal is not verified"
+                        )
+                    )
+                else:
+                    non_official_reasons.append(
+                        (
+                            f"resource {resource_schema_label} bound toolchain is not "
+                            "sealed read-only"
+                            if toolchain_origin == "resource-bound-toolchain"
+                            else f"resource {resource_schema_label} active platform "
+                            "runtime is not sealed read-only"
+                        )
+                    )
             if not resource_inventory.get("verified"):
                 non_official_reasons.append(
-                    "resource v3 bundle inventory is not completely verified"
+                    f"resource {resource_schema_label} bundle inventory is not "
+                    "completely verified"
                 )
-            elif not resource_inventory.get("sealed_read_only"):
+            elif not resource_inventory.get(
+                "integrity_seal_verified",
+                resource_inventory.get("sealed_read_only"),
+            ):
                 non_official_reasons.append(
-                    "resource v3 bundle is not sealed read-only"
+                    (
+                        f"resource {resource_schema_label} bundle integrity seal is "
+                        "not verified"
+                        if sys.platform == "win32"
+                        else f"resource {resource_schema_label} bundle is not sealed "
+                        "read-only"
+                    )
                 )
-        if self._ambient_library_path:
+        for name in sorted(getattr(self, "_ambient_loader_overrides", {})):
             non_official_reasons.append(
-                "ambient LD_LIBRARY_PATH extends the dynamic-library search path"
+                f"ambient {name} was present at parent startup; it was removed "
+                "from helper launches but may already have affected the Python process"
             )
-        if self._ambient_ld_preload:
+        if getattr(self, "_ambient_glibc_tunables_present", False):
             non_official_reasons.append(
-                "ambient LD_PRELOAD is present and can inject unverified code"
+                "ambient GLIBC_TUNABLES was present at parent startup; it was "
+                "removed from helper launches but may already have affected the "
+                "Python process"
             )
-        if self._ambient_ld_audit:
+        if sys.platform == "win32" and getattr(
+            self, "_ambient_windows_path_risk", False
+        ):
             non_official_reasons.append(
-                "ambient LD_AUDIT is present and can inject unverified code"
+                "ambient Windows PATH contained non-system entries at parent startup; "
+                "PATH was emptied for helper launches"
             )
         official = extracted_subset_verified and not non_official_reasons
-        loader_environment = {
-            name: {
-                "present": bool(value),
+        ambient_loader_overrides = getattr(self, "_ambient_loader_overrides", {})
+
+        def loader_record(name: str) -> dict[str, Any]:
+            present = name in ambient_loader_overrides
+            value = ambient_loader_overrides.get(name)
+            return {
+                "ambient_present": present,
+                "removed_from_helper_environment": True,
                 "sha256": (
                     hashlib.sha256(os.fsencode(value)).hexdigest()
-                    if value
+                    if present and value is not None
                     else None
                 ),
             }
-            for name, value in (
-                ("LD_PRELOAD", self._ambient_ld_preload),
-                ("LD_AUDIT", self._ambient_ld_audit),
-            )
+
+        loader_environment = {
+            name: loader_record(name) for name in LOADER_OVERRIDE_VARIABLES
         }
+        if sys.platform.startswith("linux"):
+            loader_environment["LD_LIBRARY_PATH"].update(
+                {
+                    "helper_value_source": "manifest-bound-runtime",
+                    "helper_relative_paths": getattr(
+                        self, "_bound_linux_library_paths", []
+                    ),
+                }
+            )
+        glibc_present = getattr(self, "_ambient_glibc_tunables_present", False)
+        glibc_value = getattr(self, "_ambient_glibc_tunables", None)
+        glibc_record = {
+            "ambient_present": glibc_present,
+            "removed_from_helper_environment": True,
+            "sha256": (
+                hashlib.sha256(os.fsencode(glibc_value)).hexdigest()
+                if glibc_present and glibc_value is not None
+                else None
+            ),
+        }
+        loader_policy = {
+            "schema": "qazmorph-native-helper-loader-environment-v2",
+            "captured_name_policy": {
+                "exact_uppercase_prefixes": list(LOADER_OVERRIDE_PREFIXES),
+                "exact_names": [GLIBC_TUNABLES_VARIABLE],
+            },
+            "ambient_records": {
+                name: loader_record(name)
+                for name in sorted(ambient_loader_overrides)
+            },
+            "glibc_tunables": glibc_record,
+            "clean_parent_startup": not ambient_loader_overrides and not glibc_present,
+            "all_ambient_values_removed_from_helper_environment": True,
+            "linux_helper_ld_library_path": {
+                "source": "manifest-bound-runtime",
+                "relative_paths": getattr(self, "_bound_linux_library_paths", []),
+            }
+            if sys.platform.startswith("linux")
+            else None,
+        }
+        resource_build_toolchain = getattr(
+            self,
+            "resource_build_toolchain_binding",
+            self.manifest.get("build", {}).get("toolchain"),
+        )
+        active_binding = getattr(self, "toolchain_binding", resource_build_toolchain)
+        active_runtime = {
+            "origin": toolchain_origin,
+            "bundle_id": (
+                active_binding.get("bundle_id")
+                if isinstance(active_binding, dict)
+                else None
+            ),
+            "platform_lock": getattr(self, "platform_runtime_lock_entry", None),
+        }
+        resource_producer_inputs = self.manifest.get("build", {}).get("inputs")
+        resource_producer_source = {
+            "contract": "separate-manifest-bound-resource-producer-snapshot-v1",
+            "bundle_id": self.manifest.get("bundle_id"),
+            "snapshot_required_separately": True,
+            "runtime_consumer_source_substitution_allowed": False,
+            "consumer_source_identity_verified_by_runtime": False,
+            "inputs": (
+                dict(resource_producer_inputs)
+                if isinstance(resource_producer_inputs, dict)
+                else None
+            ),
+        }
+        if sys.platform == "darwin":
+            dynamic_dependency_closure = (
+                "non-system Mach-O dependencies are included in the active runtime "
+                "manifest; Apple libSystem and libc++ remain host System Libraries"
+            )
+        elif sys.platform.startswith("linux"):
+            dynamic_dependency_closure = (
+                "host ELF dependencies outside the extracted manifest are not byte-locked"
+            )
+        elif sys.platform == "win32":
+            dynamic_dependency_closure = (
+                "Windows system DLLs outside the extracted manifest are not byte-locked"
+            )
+        else:
+            dynamic_dependency_closure = (
+                "host system libraries outside the extracted manifest are not byte-locked"
+            )
         return {
             "official": official,
             "verified": extracted_subset_verified,
-            "verification_scope": "complete resource bundle and extracted toolchain subset",
+            "verification_scope": "complete resource bundle and complete active runtime bundle",
             "byte_closed": False,
-            "dynamic_dependency_closure": (
-                "host ELF dependencies outside the extracted manifest are not byte-locked"
-            ),
+            "dynamic_dependency_closure": dynamic_dependency_closure,
             "guesser_runtime": {
                 "format": self.guesser_format,
                 "verified_finite": self.guesser_verified_finite,
                 "productive_safe": self.guesser_productive_safe,
                 "reason": self.guesser_safety_reason,
             },
+            "productive_generator_runtime": {
+                "installed": bool(
+                    self.manifest["schema"] == RESOURCE_MANIFEST_V4
+                    and self.productive_generator_path.is_file()
+                ),
+                "verified_finite": self.productive_generator_verified_finite,
+                "productive_safe": self.productive_generator_safe,
+                "reason": self.productive_generator_safety_reason,
+            },
             "non_official_reasons": non_official_reasons,
             "executables": executables,
             "toolchain_manifest": toolchain,
+            "resource_build_toolchain": resource_build_toolchain,
+            "resource_producer_source": resource_producer_source,
+            "active_runtime": active_runtime,
             "resource_inventory": resource_inventory,
             "toolchain_inventory": inventory,
             "environment": {
                 "LANG": self.environment.get("LANG"),
                 "LC_ALL": self.environment.get("LC_ALL"),
-                "LD_LIBRARY_PATH": self.environment.get("LD_LIBRARY_PATH"),
+                "PATH": {
+                    "ambient_present": getattr(
+                        self, "_ambient_windows_path_present", False
+                    ),
+                    "ambient_untrusted": getattr(
+                        self, "_ambient_windows_path_risk", False
+                    ),
+                    "removed_from_helper_environment": sys.platform == "win32",
+                },
+                "GLIBC_TUNABLES": glibc_record,
+                "loader_policy": loader_policy,
                 **loader_environment,
             },
         }
@@ -1126,6 +1886,7 @@ class FSTBackend:
                 check=False,
                 timeout=timeout,
                 env=self.environment,
+                cwd=_helper_working_directory(self.hfst_proc),
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise BackendError(f"HFST analysis failed: {exc}") from exc
@@ -1146,6 +1907,7 @@ class FSTBackend:
                 check=False,
                 timeout=timeout,
                 env=self.environment,
+                cwd=_helper_working_directory(self.cg_proc),
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise BackendError(f"Constraint Grammar disambiguation failed: {exc}") from exc
@@ -1246,8 +2008,27 @@ class FSTBackend:
         return contextual if contextual is not None else lattice
 
     def generate(self, lexical_form: str, *, limit: int = 128, timeout: float = 10.0) -> list[str]:
-        if limit < 1:
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit < 1:
             raise ValueError("generation limit must be positive")
+        if (
+            not isinstance(timeout, (int, float))
+            or isinstance(timeout, bool)
+            or not math.isfinite(timeout)
+            or timeout <= 0
+        ):
+            raise ValueError("generation timeout must be finite and positive")
+        if not isinstance(lexical_form, str) or not lexical_form:
+            raise ValueError("generation query must be a nonempty string")
+        if any(
+            character in "\t\r\n\0"
+            or unicodedata.category(character) in {"Cc", "Cs", "Zl", "Zp"}
+            for character in lexical_form
+        ):
+            raise ValueError("generation query contains a record delimiter")
+        if len(lexical_form.encode("utf-8")) > GENERATION_QUERY_BYTE_LIMIT:
+            raise ValueError(
+                "exact morphology query exceeds the bounded generator input size"
+            )
         generator = self.resource_dir / "kaz.autogen.hfstol"
         if not self.hfst_optimized_lookup or not generator.is_file():
             raise BackendError("Morphological generator resource or hfst-optimized-lookup is unavailable")
@@ -1269,6 +2050,7 @@ class FSTBackend:
                 check=False,
                 timeout=timeout,
                 env=self.environment,
+                cwd=_helper_working_directory(self.hfst_optimized_lookup),
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise BackendError(f"HFST generation failed: {exc}") from exc

@@ -1,0 +1,3 @@
+# Release identities hash checked-out source bytes, so text must never depend on
+# a contributor's or runner's core.autocrlf setting.
+* text=auto eol=lf

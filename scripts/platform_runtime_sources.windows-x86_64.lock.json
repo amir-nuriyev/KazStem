@@ -1,0 +1,243 @@
+{
+  "schema": "kazstem-platform-runtime-source-lock-v1",
+  "distribution": "Apertium Project.JJ Windows nightly x86_64 (2026-08-05)",
+  "platform": {
+    "system": "windows",
+    "machine": "x86_64",
+    "minimum_os": "10.0.20348"
+  },
+  "runtime_version_label": "windows-x86_64-hfst3.17.2-cg3-1.6.8",
+  "required_commands": [
+    {
+      "name": "hfst-proc",
+      "path": "usr/bin/hfst-proc.exe",
+      "version_args": ["--version"]
+    },
+    {
+      "name": "hfst-optimized-lookup",
+      "path": "usr/bin/hfst-optimized-lookup.exe",
+      "version_args": ["--version"]
+    },
+    {
+      "name": "cg-proc",
+      "path": "usr/bin/cg-proc.exe",
+      "version_args": ["-v"]
+    }
+  ],
+  "dependency_policy": {
+    "format": "pe-import-closure-v1",
+    "allowed_system_libraries": [
+      "advapi32.dll",
+      "kernel32.dll",
+      "msvcrt.dll",
+      "user32.dll"
+    ]
+  },
+  "archives": [
+    {
+      "component": "HFST 3.17.2 (git e16268eb)",
+      "filename": "hfst-3.17.2+g4028~e16268eb.x86_64.zip",
+      "url": "https://apertium.projectjj.com/windows/nightly/x86_64/hfst-3.17.2+g4028~e16268eb.x86_64.zip",
+      "bytes": 21970467,
+      "sha256": "a28df94fd80d3d6fe2401f5d71c31b96fad7c01c973e2b26c539ce1016e4542e"
+    },
+    {
+      "component": "CG-3 1.6.8 (git 8d5fa4dd)",
+      "filename": "cg3-1.6.8+g2347~8d5fa4dd.x86_64.zip",
+      "url": "https://apertium.projectjj.com/windows/nightly/x86_64/cg3-1.6.8+g2347~8d5fa4dd.x86_64.zip",
+      "bytes": 16333576,
+      "sha256": "6df5801f2dfec584822b68ade4f3d25618cdfdad6cb0a1fb3704364c9a10c45b"
+    }
+  ],
+  "corresponding_sources": [
+    {
+      "component": "HFST",
+      "revision": "e16268ebb6af72590d82da3867dcbb5f48e3f11c",
+      "filename": "hfst-e16268ebb6af72590d82da3867dcbb5f48e3f11c.tar.gz",
+      "url": "https://codeload.github.com/hfst/hfst/tar.gz/e16268ebb6af72590d82da3867dcbb5f48e3f11c",
+      "bytes": 22869286,
+      "sha256": "ec433d734d2efba3aefd97841b1ef3c4cd2c6ffb4bc8b9dcb1d83be03d737497"
+    },
+    {
+      "component": "CG-3",
+      "revision": "8d5fa4ddc396bcb9cbee76baafa0aa025f182dbc",
+      "filename": "cg3-8d5fa4ddc396bcb9cbee76baafa0aa025f182dbc.tar.gz",
+      "url": "https://codeload.github.com/GrammarSoft/cg3/tar.gz/8d5fa4ddc396bcb9cbee76baafa0aa025f182dbc",
+      "bytes": 393969,
+      "sha256": "d1741c6850be9f16a81dd567cd87c2523a3de7e67ffc461a773e705edd57b37c"
+    },
+    {
+      "component": "foma",
+      "revision": "5a800702f8e49ef994fc4058c442a365c22ceeca",
+      "filename": "foma-5a800702f8e49ef994fc4058c442a365c22ceeca.tar.gz",
+      "url": "https://codeload.github.com/TinoDidriksen/foma/tar.gz/5a800702f8e49ef994fc4058c442a365c22ceeca",
+      "bytes": 187277,
+      "sha256": "f05180a4ef7599f319628fa2775247cc61814872f1fa379f3626681c935b4942"
+    },
+    {
+      "component": "OpenFst",
+      "revision": "04a59153ece50a28829ef8e68f820ffda93805c6",
+      "filename": "openfst-04a59153ece50a28829ef8e68f820ffda93805c6.tar.gz",
+      "url": "https://codeload.github.com/TinoDidriksen/openfst/tar.gz/04a59153ece50a28829ef8e68f820ffda93805c6",
+      "bytes": 962754,
+      "sha256": "f18dbe7325df797173ed0399ee03ea9fb941791a9810b7bedcd666792302ab40"
+    },
+    {
+      "component": "ICU",
+      "revision": "74.2",
+      "filename": "icu4c-74_2-src.tgz",
+      "url": "https://github.com/unicode-org/icu/releases/download/release-74-2/icu4c-74_2-src.tgz",
+      "bytes": 26529443,
+      "sha256": "68db082212a96d6f53e35d60f47d38b962e9f9d207a74cfac78029ae8ff5e08c"
+    },
+    {
+      "component": "GNU Readline",
+      "revision": "8.2",
+      "filename": "readline-8.2.tar.gz",
+      "url": "https://ftp.gnu.org/gnu/readline/readline-8.2.tar.gz",
+      "bytes": 3043952,
+      "sha256": "3feb7171f16a84ee82ca18a36d7b9be109a52c04f492a053331d7d1095007c35"
+    },
+    {
+      "component": "GNU Termcap",
+      "revision": "1.3.1",
+      "filename": "termcap-1.3.1.tar.gz",
+      "url": "https://ftp.gnu.org/gnu/termcap/termcap-1.3.1.tar.gz",
+      "bytes": 439416,
+      "sha256": "91a0e22e5387ca4467b5bcb18edf1c51b930262fd466d5fda396dd9d26719100"
+    },
+    {
+      "component": "SQLite",
+      "revision": "3.46.0",
+      "filename": "sqlite-autoconf-3460000.tar.gz",
+      "url": "https://www.sqlite.org/2024/sqlite-autoconf-3460000.tar.gz",
+      "bytes": 3265248,
+      "sha256": "6f8e6a7b335273748816f9b3b62bbdc372a889de8782d7f048c653a447417a7d"
+    },
+    {
+      "component": "zlib",
+      "revision": "1.3.1",
+      "filename": "zlib-1.3.1.tar.xz",
+      "url": "https://github.com/madler/zlib/releases/download/v1.3.1/zlib-1.3.1.tar.xz",
+      "bytes": 1305740,
+      "sha256": "38ef96b8dfe510d42707d9c781877914792541133e1870841463bfa73f883e32"
+    },
+    {
+      "component": "dlfcn-win32",
+      "revision": "1.4.1",
+      "filename": "dlfcn-win32-1.4.1.tar.gz",
+      "url": "https://github.com/dlfcn-win32/dlfcn-win32/archive/refs/tags/v1.4.1.tar.gz",
+      "bytes": 24997,
+      "sha256": "30a9f72bdf674857899eb7e553df1f0d362c5da2a576ae51f886e1171fbdb399"
+    },
+    {
+      "component": "GCC",
+      "revision": "13.3.0",
+      "filename": "gcc-13.3.0.tar.xz",
+      "url": "https://ftp.gnu.org/gnu/gcc/gcc-13.3.0/gcc-13.3.0.tar.xz",
+      "bytes": 87909952,
+      "sha256": "0845e9621c9543a13f484e94584a49ffc0129970e9914624235fc1d061a0c083"
+    },
+    {
+      "component": "MinGW-w64",
+      "revision": "12.0.0",
+      "filename": "mingw-w64-v12.0.0.tar.bz2",
+      "url": "https://downloads.sourceforge.net/project/mingw-w64/mingw-w64/mingw-w64-release/mingw-w64-v12.0.0.tar.bz2",
+      "bytes": 10474283,
+      "sha256": "cc41898aac4b6e8dd5cffd7331b9d9515b912df4420a3a612b5ea2955bbeed2f"
+    },
+    {
+      "component": "MXE recipes",
+      "revision": "9f349e0de62a4a68bfc0f13d835a6c685dae9daa",
+      "filename": "mxe-9f349e0de62a4a68bfc0f13d835a6c685dae9daa.tar.gz",
+      "url": "https://codeload.github.com/mxe/mxe/tar.gz/9f349e0de62a4a68bfc0f13d835a6c685dae9daa",
+      "bytes": 2635054,
+      "sha256": "0b9c2c68394ce47fd395d087b9b405b42fe7b80a4221431a734bfd0b2af48616"
+    },
+    {
+      "component": "Apertium packaging recipes",
+      "revision": "444f3d53dd978fe65c4d227846f3d649de31ee46",
+      "filename": "apertium-packaging-444f3d53dd978fe65c4d227846f3d649de31ee46.tar.gz",
+      "url": "https://codeload.github.com/apertium/packaging/tar.gz/444f3d53dd978fe65c4d227846f3d649de31ee46",
+      "bytes": 421092,
+      "sha256": "fd41f005e1100f5f3f622b38f2baa27221be94fbdf65be60bf52d91328695c91"
+    }
+  ],
+  "components": [
+    {
+      "name": "HFST command-line tools",
+      "version": "3.17.2+git-e16268eb",
+      "license": "GPL-3.0-or-later"
+    },
+    {
+      "name": "libhfst",
+      "version": "57 ABI from HFST git e16268eb",
+      "license": "LGPL-3.0-or-later with separately licensed back ends"
+    },
+    {
+      "name": "CG-3 and libcg3",
+      "version": "1.6.8.13898 (git 8d5fa4dd)",
+      "license": "GPL-3.0-or-later"
+    },
+    {
+      "name": "foma",
+      "version": "0.10.0+git-5a800702",
+      "license": "Apache-2.0"
+    },
+    {
+      "name": "OpenFst",
+      "version": "1.8.5+git-04a59153",
+      "license": "Apache-2.0"
+    },
+    {
+      "name": "ICU",
+      "version": "74.2",
+      "license": "Unicode-3.0"
+    },
+    {
+      "name": "GNU Readline",
+      "version": "8.2",
+      "license": "GPL-3.0-or-later"
+    },
+    {
+      "name": "GNU Termcap",
+      "version": "1.3.1",
+      "license": "GPL-2.0-or-later"
+    },
+    {
+      "name": "SQLite",
+      "version": "3.46.0",
+      "license": "blessing/public-domain dedication"
+    },
+    {
+      "name": "zlib",
+      "version": "1.3.1",
+      "license": "Zlib"
+    },
+    {
+      "name": "dlfcn-win32",
+      "version": "1.4.1",
+      "license": "MIT"
+    },
+    {
+      "name": "GCC runtime libraries",
+      "version": "13.3.0",
+      "license": "GPL-3.0-or-later WITH GCC-exception-3.1"
+    },
+    {
+      "name": "MinGW-w64 runtime",
+      "version": "12.0.0",
+      "license": "ZPL-2.1 and permissive/public-domain component terms"
+    },
+    {
+      "name": "MXE build recipes",
+      "version": "git-9f349e0d",
+      "license": "MIT"
+    },
+    {
+      "name": "Apertium packaging recipes",
+      "version": "git-444f3d53",
+      "license": "GPL-2.0-or-later"
+    }
+  ]
+}

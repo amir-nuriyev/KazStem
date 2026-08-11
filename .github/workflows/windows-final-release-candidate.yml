@@ -1,0 +1,96 @@
+name: Validate Windows final-release tooling (no publish)
+
+# This is deliberately a read-only contract workflow.  The final asset job is
+# enabled only after the immutable v0.2.3 tag and every hash-bound release input
+# have been frozen; this workflow cannot create tags, releases, or packages.
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      source_commit:
+        description: Full reviewed commit SHA to validate on windows-2022
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  source-contract:
+    name: Windows Server 2022 release-contract tests
+    runs-on: windows-2022
+    timeout-minutes: 30
+    steps:
+      - name: Check out the exact requested commit without credentials
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || inputs.source_commit }}
+
+      - name: Select the pinned release Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: 3.14.3
+
+      - name: Run checked Windows release-tooling gates
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          New-Item -ItemType Directory -Path (Join-Path $env:RUNNER_TEMP 'kazstem-final-contract') | Out-Null
+          $expected = '${{ github.event.pull_request.head.sha || inputs.source_commit }}'
+          if ($expected -notmatch '^[0-9a-f]{40}$') { throw 'source_commit must be a full lowercase SHA-1' }
+          $head = git rev-parse HEAD
+          if ($head -ne $expected) { throw "checkout differs: expected=$expected observed=$head" }
+          Get-ChildItem Env: | Where-Object {
+            $_.Name -eq 'PYTHONPATH' -or $_.Name -eq 'GLIBC_TUNABLES' -or
+            $_.Name.StartsWith('GIT_') -or $_.Name.StartsWith('LD_') -or
+            $_.Name.StartsWith('DYLD_')
+          } | ForEach-Object { Remove-Item -LiteralPath "Env:$($_.Name)" }
+          $focusedPycache = Join-Path $env:RUNNER_TEMP 'kazstem-final-focused-pycache'
+          $focused = @'
+          import os
+          import sys
+          import unittest
+          repository = os.getcwd()
+          sys.path[:0] = [repository, os.path.join(repository, 'src')]
+          suite = unittest.defaultTestLoader.loadTestsFromNames([
+              'tests.test_windows_final_release_tooling',
+          ])
+          result = unittest.TextTestRunner(verbosity=2).run(suite)
+          raise SystemExit(0 if result.wasSuccessful() else 1)
+          '@
+          $focused | python -I -B -X "pycache_prefix=$focusedPycache" - 2>&1 |
+            Tee-Object -FilePath (Join-Path $env:RUNNER_TEMP 'kazstem-final-contract/focused-tests.txt')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $forbiddenBytecode = Get-ChildItem -LiteralPath . -Recurse -Force |
+            Where-Object { $_.Name -eq '__pycache__' -or $_.Extension -in @('.pyc', '.pyo', '.pyd') }
+          if ($forbiddenBytecode) {
+            throw "source-side contract run created or retained forbidden adjacent bytecode"
+          }
+          $tree = git rev-parse 'HEAD^{tree}'
+          $focusedHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $env:RUNNER_TEMP 'kazstem-final-contract/focused-tests.txt')).Hash.ToLowerInvariant()
+          [ordered]@{
+            schema = 'kazstem-windows-final-workflow-draft-v1'
+            result = 'pass'
+            source_commit = $head
+            source_tree = $tree
+            runner_os = $env:RUNNER_OS
+            runner_arch = $env:RUNNER_ARCH
+            image_os = $env:ImageOS
+            image_version = $env:ImageVersion
+            focused_log_sha256 = $focusedHash
+            publishing_performed = $false
+            note = 'Native Windows contract tests only; the platform-neutral full suite is gated separately. No release identity or asset was frozen.'
+          } | ConvertTo-Json | Out-File `
+            -FilePath (Join-Path $env:RUNNER_TEMP 'kazstem-final-contract/DRAFT-NOT-A-RELEASE.json') `
+            -Encoding utf8
+
+      - name: Upload private contract evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: kazstem-windows-final-contract-${{ github.run_id }}
+          path: ${{ runner.temp }}/kazstem-final-contract
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 9

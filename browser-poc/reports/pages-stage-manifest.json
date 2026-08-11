@@ -39,19 +39,19 @@
     },
     "legal/SOURCE-ARCHIVE.json": {
       "bytes": 215,
-      "sha256": "b17bebcb362913832dc5b57d3be3e3d291e6bbbec9c87004a70ce4d24fb488e1"
+      "sha256": "3998489a8857d2ee6c0263aaad0444bf2c6fb22064c3849650413a80a1ce65fe"
     },
     "legal/SOURCE.md": {
       "bytes": 2756,
       "sha256": "359752644e63359a6d89a4bed39b0bf9181b0eb11b6f93b303399f2de90b327c"
     },
     "legal/THIRD_PARTY.md": {
-      "bytes": 6281,
-      "sha256": "b00ced3453e7c5c0875577dd94923391fb030f4ac33b723a55556e01f5bf1638"
+      "bytes": 6436,
+      "sha256": "66162a018c61da5cfbb08b5589806b826408b685726e87fb7e3e3854c1b77380"
     },
     "legal/kazstem-browser-corresponding-source-0.2.1.tar.gz": {
-      "bytes": 9499007,
-      "sha256": "9d054a121d50f187bcc14f93b84cf6dd2e9dea3a49046fa75c422bd069d7bafb"
+      "bytes": 9501020,
+      "sha256": "05774450693711d4d54afdcb4eb8631fadc11c3355a1d5fde34a3a37ebe31926"
     },
     "manifest.webmanifest": {
       "bytes": 406,
@@ -83,7 +83,7 @@
     },
     "sw.js": {
       "bytes": 1442,
-      "sha256": "5c2d4a0f3b8b2df06253dcbe24592d57bdbd6fc8b583896a92b6cdac45f282e0"
+      "sha256": "b22a11640e84b25c45ffd88214e81edcd746960bb590d1111a50af4d1c21c8a5"
     },
     "worker.js": {
       "bytes": 14405,
@@ -111,9 +111,9 @@
     "./legal/SOURCE.md",
     "./legal/SOURCE-ARCHIVE.json"
   ],
-  "precache_identity": "kazstem-browser-d0df783b4a51-v4",
+  "precache_identity": "kazstem-browser-d0df783b4a51-v5",
   "probe_ledger_summary_precached": true,
   "result": "pass",
   "schema": "kazstem.browser-pages-stage.v1",
-  "total_bytes": 11593853
+  "total_bytes": 11596021
 }
