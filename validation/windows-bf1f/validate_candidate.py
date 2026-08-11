@@ -17,6 +17,7 @@ import statistics
 import stat
 import subprocess
 import sys
+import tarfile
 import tempfile
 import time
 from typing import Any
@@ -204,11 +205,12 @@ def run_integration_tests(repository: Path, site_packages: Path, output: Path) -
     print(stream.getvalue(), end="")
 
 
-def probe_hfst_proc(helper: Path, fst: Path, output: Path) -> None:
+def probe_hfst_proc(helper: Path, fst: Path, hfst_source: Path, output: Path) -> None:
     if sys.platform != "win32":
         raise ValidationError("hfst-proc pipe probe requires native Windows")
     selected_helper = helper.resolve(strict=True)
     selected_fst = fst.resolve(strict=True)
+    selected_source = hfst_source.resolve(strict=True)
     stream_payload = "Сәлем\nсәлем\nоқу\nҚазақстан\n".encode("utf-8")
     atomic_payload = "Сәлем\0сәлем\0оқу\0Қазақстан\0".encode("utf-8")
     environment = {
@@ -364,6 +366,40 @@ def probe_hfst_proc(helper: Path, fst: Path, output: Path) -> None:
                 "stderr": completed.stderr,
                 "stderr_sha256": sha256_bytes(stderr_bytes),
             }
+        case_payload = (
+            "Сәлем\nсәлем\nСӘЛЕМ\n"
+            "Оқу\nоқу\nОҚУ\n"
+            "Қазақстан\nҚАЗАҚСТАН\n"
+            "болып табылады\nБолып табылады\nБОЛЫП ТАБЫЛАДЫ\n"
+            "\\[Қазақстан\\] \\^сөз\\$ \\\\ C++ \\{қазақ\\}\n"
+        ).encode("utf-8")
+        for mode, mode_args in (
+            ("ignore-case-default", []),
+            ("dictionary-case", ["-w"]),
+            ("case-sensitive", ["-c"]),
+        ):
+            command = [str(selected_helper), *mode_args, str(selected_fst)]
+            completed = subprocess.run(
+                command,
+                input=case_payload,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                cwd=selected_helper.parent,
+                env=environment,
+                timeout=30,
+                check=False,
+                creationflags=CREATE_NO_WINDOW,
+            )
+            records[f"case-mode-{mode}"] = {
+                "argv": ["hfst-proc.exe", *mode_args, "<BF1F-AUTOMORF>"],
+                "returncode": completed.returncode,
+                "stdin": case_payload.decode("utf-8"),
+                "stdin_sha256": sha256_bytes(case_payload),
+                "stdout": completed.stdout.decode("utf-8", "strict"),
+                "stdout_sha256": sha256_bytes(completed.stdout),
+                "stderr": completed.stderr.decode("utf-8", "replace"),
+                "stderr_sha256": sha256_bytes(completed.stderr),
+            }
     stream_control = records["stream-redirected-stdin"]
     stream_input_only = records["stream-positional-input-stdout"]
     stream_explicit = records["stream-positional-input-output"]
@@ -397,6 +433,35 @@ def probe_hfst_proc(helper: Path, fst: Path, output: Path) -> None:
     }
     result = "pass" if commands_ok else "fail"
     conclusion = "observational stdin/text/positional I/O control completed"
+    source_members: dict[str, dict[str, Any]] = {}
+    expected_source_members = {
+        "tools/src/hfst-proc/hfst-proc.cc": {
+            "bytes": 17_142,
+            "sha256": "0d9d3e305e54968074fa3ecd8c561d8e26a6527eeda29dd6458367cb2730ab50",
+        },
+        "tools/src/hfst-proc/hfst-proc.h": {
+            "bytes": 2_923,
+            "sha256": "3e61c00c1f9eea1013b0d5d23854a1423040cc4722a6ff56956b94d35d4426ba",
+        },
+        "tools/src/hfst-proc/applicators.cc": {
+            "bytes": 19_047,
+            "sha256": "c6b3c78c885f367bc5ebd2d141bf1ae32a4c84e426a03c4a1ec309ab091e03bf",
+        },
+    }
+    with tarfile.open(selected_source, "r:gz") as archive:
+        for suffix, expected in expected_source_members.items():
+            matches = [
+                member
+                for member in archive.getmembers()
+                if member.name.endswith("/" + suffix) and member.isfile()
+            ]
+            expect(len(matches) == 1, f"HFST source member mismatch: {suffix}")
+            member_stream = archive.extractfile(matches[0])
+            expect(member_stream is not None, f"cannot read HFST source member: {suffix}")
+            payload = member_stream.read(expected["bytes"] + 1)
+            actual = {"bytes": len(payload), "sha256": sha256_bytes(payload)}
+            expect(actual == expected, f"HFST source member identity mismatch: {suffix}")
+            source_members[suffix] = actual
     output.write_bytes(
         json_bytes(
             {
@@ -404,6 +469,8 @@ def probe_hfst_proc(helper: Path, fst: Path, output: Path) -> None:
                 "result": result,
                 "helper": file_record(selected_helper),
                 "fst": file_record(selected_fst),
+                "hfst_source_archive": file_record(selected_source),
+                "hfst_source_members": source_members,
                 "records": records,
                 "comparisons": comparisons,
                 "conclusion": conclusion,
@@ -1142,6 +1209,7 @@ def parser() -> argparse.ArgumentParser:
     probe = commands.add_parser("probe-hfst-proc")
     probe.add_argument("--helper", required=True, type=Path)
     probe.add_argument("--fst", required=True, type=Path)
+    probe.add_argument("--hfst-source", required=True, type=Path)
     probe.add_argument("--output", required=True, type=Path)
 
     run = commands.add_parser("validate")
@@ -1172,7 +1240,7 @@ def main() -> int:
     elif args.command == "integration":
         run_integration_tests(args.repository, args.site_packages, args.output)
     elif args.command == "probe-hfst-proc":
-        probe_hfst_proc(args.helper, args.fst, args.output)
+        probe_hfst_proc(args.helper, args.fst, args.hfst_source, args.output)
     else:
         validate(args)
     return 0

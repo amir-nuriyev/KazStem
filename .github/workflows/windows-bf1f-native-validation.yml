@@ -185,6 +185,7 @@ jobs:
             validation/windows-bf1f/validate_candidate.py probe-hfst-proc `
             --helper (Join-Path $env:KAZSTEM_BF1F_RUNTIME 'usr/bin/hfst-proc.exe') `
             --fst (Join-Path $env:KAZSTEM_BF1F_RESOURCE 'kaz.automorf.hfstol') `
+            --hfst-source (Join-Path $env:KAZSTEM_BF1F_WORK 'inputs/sources/hfst-e16268ebb6af72590d82da3867dcbb5f48e3f11c.tar.gz') `
             --output (Join-Path $env:KAZSTEM_BF1F_WORK 'evidence/hfst-proc-pipe-input.json')
 
       - name: Run the exact wheel resource suite and full native matrix
