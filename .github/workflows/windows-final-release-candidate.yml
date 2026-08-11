@@ -49,9 +49,11 @@ jobs:
           } | ForEach-Object { Remove-Item -LiteralPath "Env:$($_.Name)" }
           $focusedPycache = Join-Path $env:RUNNER_TEMP 'kazstem-final-focused-pycache'
           $focused = @'
+          import os
           import sys
           import unittest
-          sys.path.insert(0, 'src')
+          repository = os.getcwd()
+          sys.path[:0] = [repository, os.path.join(repository, 'src')]
           suite = unittest.defaultTestLoader.loadTestsFromNames([
               'tests.test_backend',
               'tests.test_guesser',
@@ -67,9 +69,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $fullPycache = Join-Path $env:RUNNER_TEMP 'kazstem-final-full-pycache'
           $full = @'
+          import os
           import sys
           import unittest
-          sys.path.insert(0, 'src')
+          repository = os.getcwd()
+          sys.path[:0] = [repository, os.path.join(repository, 'src')]
           suite = unittest.defaultTestLoader.discover('tests', pattern='test_*.py', top_level_dir='.')
           result = unittest.TextTestRunner(verbosity=1).run(suite)
           raise SystemExit(0 if result.wasSuccessful() else 1)
