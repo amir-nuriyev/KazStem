@@ -1395,5 +1395,9 @@ class PersistentGuesserTests(unittest.TestCase):
         self.assertEqual(child_result, b"ok")
 
 
+    def test_worker_binds_helper_parent_as_windows_cwd(self) -> None:
+        self.assertEqual(self.guesser._worker.working_directory, self.helper.parent)
+
+
 if __name__ == "__main__":
     unittest.main()

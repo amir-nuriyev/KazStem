@@ -213,6 +213,14 @@ legacy v2 rollback set
 `official=false`. The extracted subset is verified, but host-provided ELF
 dependencies are not byte-locked; provenance therefore states
 `byte_closed=false` rather than implying a hermetic operating-system image.
+Every exact-uppercase ambient `LD_*`/`DYLD_*` value and `GLIBC_TUNABLES` is
+removed from native-helper children and represented only by presence/removal
+flags and hashes. This does not retroactively sanitize the Python parent: a
+relevant `LD_*`/`DYLD_*` override, or an untrusted Windows loader `PATH`,
+present at parent startup remains a non-official provenance condition. Linux's
+effective helper library path is derived only from portable manifest-bound
+runtime directories; Windows helpers use an empty child `PATH` and their own
+bound directory as `cwd`.
 
 `Analyzer.generate()` is dictionary-only unless `productive=True` is explicit.
 The opt-in path accepts exact structured tag atoms, gives dictionary output

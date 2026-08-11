@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import hashlib
+import ctypes
 import math
+import ntpath
 import os
 from pathlib import Path
 import subprocess
@@ -19,6 +21,41 @@ class BackendError(RuntimeError):
     pass
 
 
+def _trusted_windows_loader_directories() -> tuple[str, str]:
+    """Resolve Windows/System32 from the kernel, never from ambient PATH."""
+
+    if sys.platform != "win32":
+        raise BackendError("trusted Windows loader directories requested off Windows")
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.GetSystemDirectoryW.argtypes = [ctypes.c_wchar_p, ctypes.c_uint]
+    kernel32.GetSystemDirectoryW.restype = ctypes.c_uint
+    kernel32.GetWindowsDirectoryW.argtypes = [ctypes.c_wchar_p, ctypes.c_uint]
+    kernel32.GetWindowsDirectoryW.restype = ctypes.c_uint
+
+    def query(function: Any, label: str) -> str:
+        buffer = ctypes.create_unicode_buffer(32768)
+        length = function(buffer, len(buffer))
+        if not length or length >= len(buffer):
+            raise BackendError(
+                f"cannot resolve trusted {label} directory: {ctypes.get_last_error()}"
+            )
+        return ntpath.normpath(buffer.value)
+
+    return (
+        query(kernel32.GetSystemDirectoryW, "System32"),
+        query(kernel32.GetWindowsDirectoryW, "Windows"),
+    )
+
+
+def _helper_working_directory(executable: str | Path) -> str | None:
+    if sys.platform != "win32":
+        return None
+    path = Path(executable)
+    if not path.is_absolute():
+        raise BackendError("Windows helper executable must be an absolute path")
+    return str(path.parent)
+
+
 APERTIUM_RESERVED = frozenset("\\^$/<>{}[]@#*+")
 ORTHOGRAPHIC_HYPHENS = frozenset("-\u2010\u2011")
 DASH_PUNCTUATION = frozenset("\u2012\u2013\u2014\u2212")
@@ -29,6 +66,22 @@ CONTROL_SUPERBLANKS = {
     "\r": "[QAZMORPH-CARRIAGE-RETURN]",
 }
 PROTECTED_CHARACTERS = frozenset("\\^$/<>{}[]@#*+~|=&`")
+LOADER_OVERRIDE_VARIABLES = (
+    "LD_LIBRARY_PATH",
+    "LD_PRELOAD",
+    "LD_AUDIT",
+    "DYLD_LIBRARY_PATH",
+    "DYLD_INSERT_LIBRARIES",
+    "DYLD_FRAMEWORK_PATH",
+    "DYLD_FALLBACK_FRAMEWORK_PATH",
+    "DYLD_FALLBACK_LIBRARY_PATH",
+    "DYLD_IMAGE_SUFFIX",
+    "DYLD_ROOT_PATH",
+    "DYLD_SHARED_REGION",
+    "DYLD_PRINT_TO_FILE",
+)
+LOADER_OVERRIDE_PREFIXES = ("LD_", "DYLD_")
+GLIBC_TUNABLES_VARIABLE = "GLIBC_TUNABLES"
 RESOURCE_MANIFEST_V2 = "qazmorph-resource-manifest-v2"
 RESOURCE_MANIFEST_V3 = "qazmorph-resource-manifest-v3"
 RESOURCE_MANIFEST_V4 = "qazmorph-resource-manifest-v4"
@@ -1186,8 +1239,41 @@ class FSTBackend:
         self._ambient_dyld_insert_libraries = environment.get(
             "DYLD_INSERT_LIBRARIES"
         )
+        self._ambient_loader_overrides = {
+            key: value
+            for key, value in environment.items()
+            if key.startswith(LOADER_OVERRIDE_PREFIXES)
+        }
+        self._ambient_glibc_tunables_present = GLIBC_TUNABLES_VARIABLE in environment
+        self._ambient_glibc_tunables = environment.get(GLIBC_TUNABLES_VARIABLE)
+        for key in self._ambient_loader_overrides:
+            environment.pop(key, None)
+        environment.pop(GLIBC_TUNABLES_VARIABLE, None)
         for key in ("CG3_DEFAULT", "CG3_OVERRIDE"):
             environment.pop(key, None)
+        if sys.platform == "win32":
+            path_keys = [key for key in environment if key.upper() == "PATH"]
+            ambient_path = environment.get(path_keys[0]) if path_keys else None
+            trusted = {
+                ntpath.normcase(ntpath.normpath(path))
+                for path in _trusted_windows_loader_directories()
+            }
+            ambient_entries = {
+                ntpath.normcase(ntpath.normpath(path))
+                for path in (ambient_path or "").split(";")
+                if path
+            }
+            self._ambient_windows_path_present = bool(ambient_path)
+            self._ambient_windows_path_risk = len(path_keys) > 1 or bool(
+                ambient_entries - trusted
+            )
+            # Helpers are selected by absolute, manifest-bound paths.  Empty
+            # PATH prevents a missing adjacent dependency from falling through
+            # to a caller-controlled directory.
+            for key in path_keys:
+                environment.pop(key, None)
+            environment["PATH"] = ""
+            return environment
         if not sys.platform.startswith("linux"):
             return environment
         prefixes = (
@@ -1195,9 +1281,11 @@ class FSTBackend:
             self.toolchain_dir / "usr" / "lib",
         )
         library_path = [str(path) for path in prefixes if path.is_dir()]
-        existing = self._ambient_library_path
-        if existing:
-            library_path.append(existing)
+        self._bound_linux_library_paths = [
+            path.relative_to(self.toolchain_dir).as_posix()
+            for path in prefixes
+            if path.is_dir()
+        ]
         if library_path:
             environment["LD_LIBRARY_PATH"] = os.pathsep.join(library_path)
         return environment
@@ -1291,6 +1379,7 @@ class FSTBackend:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 env=environment,
+                cwd=_helper_working_directory(candidate),
                 timeout=10.0,
                 check=False,
             )
@@ -1550,50 +1639,82 @@ class FSTBackend:
                         "read-only"
                     )
                 )
-        if sys.platform.startswith("linux"):
-            if getattr(self, "_ambient_library_path", None):
-                non_official_reasons.append(
-                    "ambient LD_LIBRARY_PATH extends the dynamic-library search path"
-                )
-            if getattr(self, "_ambient_ld_preload", None):
-                non_official_reasons.append(
-                    "ambient LD_PRELOAD is present and can inject unverified code"
-                )
-            if getattr(self, "_ambient_ld_audit", None):
-                non_official_reasons.append(
-                    "ambient LD_AUDIT is present and can inject unverified code"
-                )
-        elif sys.platform == "darwin":
-            if getattr(self, "_ambient_dyld_library_path", None):
-                non_official_reasons.append(
-                    "ambient DYLD_LIBRARY_PATH extends the dynamic-library search path"
-                )
-            if getattr(self, "_ambient_dyld_insert_libraries", None):
-                non_official_reasons.append(
-                    "ambient DYLD_INSERT_LIBRARIES is present and can inject unverified code"
-                )
+        for name in sorted(getattr(self, "_ambient_loader_overrides", {})):
+            non_official_reasons.append(
+                f"ambient {name} was present at parent startup; it was removed "
+                "from helper launches but may already have affected the Python process"
+            )
+        if getattr(self, "_ambient_glibc_tunables_present", False):
+            non_official_reasons.append(
+                "ambient GLIBC_TUNABLES was present at parent startup; it was "
+                "removed from helper launches but may already have affected the "
+                "Python process"
+            )
+        if sys.platform == "win32" and getattr(
+            self, "_ambient_windows_path_risk", False
+        ):
+            non_official_reasons.append(
+                "ambient Windows PATH contained non-system entries at parent startup; "
+                "PATH was emptied for helper launches"
+            )
         official = extracted_subset_verified and not non_official_reasons
-        loader_environment = {
-            name: {
-                "present": bool(value),
+        ambient_loader_overrides = getattr(self, "_ambient_loader_overrides", {})
+
+        def loader_record(name: str) -> dict[str, Any]:
+            present = name in ambient_loader_overrides
+            value = ambient_loader_overrides.get(name)
+            return {
+                "ambient_present": present,
+                "removed_from_helper_environment": True,
                 "sha256": (
                     hashlib.sha256(os.fsencode(value)).hexdigest()
-                    if value
+                    if present and value is not None
                     else None
                 ),
             }
-            for name, value in (
-                ("LD_PRELOAD", getattr(self, "_ambient_ld_preload", None)),
-                ("LD_AUDIT", getattr(self, "_ambient_ld_audit", None)),
-                (
-                    "DYLD_LIBRARY_PATH",
-                    getattr(self, "_ambient_dyld_library_path", None),
-                ),
-                (
-                    "DYLD_INSERT_LIBRARIES",
-                    getattr(self, "_ambient_dyld_insert_libraries", None),
-                ),
+
+        loader_environment = {
+            name: loader_record(name) for name in LOADER_OVERRIDE_VARIABLES
+        }
+        if sys.platform.startswith("linux"):
+            loader_environment["LD_LIBRARY_PATH"].update(
+                {
+                    "helper_value_source": "manifest-bound-runtime",
+                    "helper_relative_paths": getattr(
+                        self, "_bound_linux_library_paths", []
+                    ),
+                }
             )
+        glibc_present = getattr(self, "_ambient_glibc_tunables_present", False)
+        glibc_value = getattr(self, "_ambient_glibc_tunables", None)
+        glibc_record = {
+            "ambient_present": glibc_present,
+            "removed_from_helper_environment": True,
+            "sha256": (
+                hashlib.sha256(os.fsencode(glibc_value)).hexdigest()
+                if glibc_present and glibc_value is not None
+                else None
+            ),
+        }
+        loader_policy = {
+            "schema": "qazmorph-native-helper-loader-environment-v2",
+            "captured_name_policy": {
+                "exact_uppercase_prefixes": list(LOADER_OVERRIDE_PREFIXES),
+                "exact_names": [GLIBC_TUNABLES_VARIABLE],
+            },
+            "ambient_records": {
+                name: loader_record(name)
+                for name in sorted(ambient_loader_overrides)
+            },
+            "glibc_tunables": glibc_record,
+            "clean_parent_startup": not ambient_loader_overrides and not glibc_present,
+            "all_ambient_values_removed_from_helper_environment": True,
+            "linux_helper_ld_library_path": {
+                "source": "manifest-bound-runtime",
+                "relative_paths": getattr(self, "_bound_linux_library_paths", []),
+            }
+            if sys.platform.startswith("linux")
+            else None,
         }
         resource_build_toolchain = getattr(
             self,
@@ -1672,7 +1793,17 @@ class FSTBackend:
             "environment": {
                 "LANG": self.environment.get("LANG"),
                 "LC_ALL": self.environment.get("LC_ALL"),
-                "LD_LIBRARY_PATH": self.environment.get("LD_LIBRARY_PATH"),
+                "PATH": {
+                    "ambient_present": getattr(
+                        self, "_ambient_windows_path_present", False
+                    ),
+                    "ambient_untrusted": getattr(
+                        self, "_ambient_windows_path_risk", False
+                    ),
+                    "removed_from_helper_environment": sys.platform == "win32",
+                },
+                "GLIBC_TUNABLES": glibc_record,
+                "loader_policy": loader_policy,
                 **loader_environment,
             },
         }
@@ -1755,6 +1886,7 @@ class FSTBackend:
                 check=False,
                 timeout=timeout,
                 env=self.environment,
+                cwd=_helper_working_directory(self.hfst_proc),
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise BackendError(f"HFST analysis failed: {exc}") from exc
@@ -1775,6 +1907,7 @@ class FSTBackend:
                 check=False,
                 timeout=timeout,
                 env=self.environment,
+                cwd=_helper_working_directory(self.cg_proc),
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise BackendError(f"Constraint Grammar disambiguation failed: {exc}") from exc
@@ -1917,6 +2050,7 @@ class FSTBackend:
                 check=False,
                 timeout=timeout,
                 env=self.environment,
+                cwd=_helper_working_directory(self.hfst_optimized_lookup),
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise BackendError(f"HFST generation failed: {exc}") from exc

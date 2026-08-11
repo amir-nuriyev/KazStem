@@ -12,7 +12,7 @@ include .zenodo.json
 include .gitattributes
 recursive-include benchmarks *.md
 recursive-include docs *.md
-recursive-include packaging *.json *.md *.py *.spec
+recursive-include packaging *.json *.md *.py *.spec *.txt
 recursive-include packaging/resource-producer *
 recursive-include scripts *.json *.py *.sh
 recursive-include tests *.py

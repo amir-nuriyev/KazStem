@@ -57,16 +57,22 @@ def json_strings(value: Any):
             yield from json_strings(item)
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--root", required=True, type=Path)
-    parser.add_argument("--forbid", required=True, action="append")
-    parser.add_argument("--output", required=True, type=Path)
-    args = parser.parse_args()
-    root = args.root.resolve(strict=True)
-    output = args.output.resolve()
+def scan_evidence(
+    root: Path,
+    *,
+    forbidden_values: list[str],
+    output: Path | None = None,
+) -> dict[str, Any]:
+    """Run the reviewed decoded JSON/text scanner without writing output."""
+
+    root = root.resolve(strict=True)
+    output_resolved = output.resolve(strict=False) if output is not None else None
     forbidden = sorted(
-        {token for value in args.forbid for token in forbidden_tokens(value)},
+        {
+            token
+            for value in forbidden_values
+            for token in forbidden_tokens(value)
+        },
         key=len,
         reverse=True,
     )
@@ -76,7 +82,9 @@ def main() -> int:
     checked: list[str] = []
     failures: list[dict[str, str]] = []
     for path in sorted(root.rglob("*"), key=lambda item: item.as_posix()):
-        if not path.is_file() or path.resolve() == output:
+        if not path.is_file() or (
+            output_resolved is not None and path.resolve() == output_resolved
+        ):
             continue
         if path.suffix.casefold() not in TEXT_SUFFIXES:
             continue
@@ -118,7 +126,7 @@ def main() -> int:
             "absolute machine paths leaked into evidence: "
             + json.dumps(failures, ensure_ascii=False, sort_keys=True)
         )
-    result = {
+    return {
         "schema": "kazstem-logical-evidence-path-audit-v1",
         "result": "pass",
         "root": root.name,
@@ -126,12 +134,28 @@ def main() -> int:
         "forbidden_root_count": len(forbidden),
         "absolute_root_leaks": [],
     }
-    output.write_text(
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--root", required=True, type=Path)
+    parser.add_argument("--forbid", required=True, action="append")
+    parser.add_argument("--output", required=True, type=Path)
+    args = parser.parse_args()
+    result = scan_evidence(
+        args.root,
+        forbidden_values=args.forbid,
+        output=args.output,
+    )
+    args.output.resolve().write_text(
         json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
         newline="\n",
     )
-    print(f"logical evidence paths verified across {len(checked)} text files")
+    print(
+        "logical evidence paths verified across "
+        f"{len(result['text_files_checked'])} text files"
+    )
     return 0
 
 

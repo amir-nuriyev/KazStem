@@ -8,6 +8,14 @@ from PyInstaller.utils.hooks import collect_data_files
 
 
 entrypoint = Path(os.environ["KAZSTEM_ENTRYPOINT"]).resolve(strict=True)
+noarchive_value = os.environ.get("KAZSTEM_NOARCHIVE", "0")
+if noarchive_value not in {"0", "1"}:
+    raise ValueError("KAZSTEM_NOARCHIVE must be exactly 0 or 1")
+noarchive = noarchive_value == "1"
+if os.environ.get("KAZSTEM_PYTHON_OPTIMIZE", "0") != "0":
+    raise ValueError(
+        "Windows release builds forbid -O while helper cleanup contains active asserts"
+    )
 datas = collect_data_files("qazmorph")
 
 a = Analysis(
@@ -41,7 +49,7 @@ a = Analysis(
         "test", "doctest", "pdb", "profile", "pstats", "cProfile",
         "distutils", "setuptools", "pip", "ensurepip", "venv",
     ],
-    noarchive=False,
+    noarchive=noarchive,
     optimize=0,
 )
 

@@ -11,6 +11,7 @@ from unittest import mock
 
 from qazmorph.backend import (
     _guesser_safety_reason,
+    _helper_working_directory,
     _has_verified_v4_productive_generator_gate,
     _has_verified_v3_guesser_gate,
     _hyphen_chains,
@@ -19,8 +20,10 @@ from qazmorph.backend import (
     BackendError,
     escape_apertium_text,
     FSTBackend,
+    GLIBC_TUNABLES_VARIABLE,
     GUESSER_FINITE_SCHEMA_V1,
     GUESSER_FINITE_SCHEMA_V2,
+    LOADER_OVERRIDE_VARIABLES,
     PINNED_LEGACY_V1_BUNDLE_ID,
     RESOURCE_FILES_BY_SCHEMA,
     RESOURCE_MANIFEST_V2,
@@ -1138,31 +1141,44 @@ class ResourceManifestTests(unittest.TestCase):
             )
             backend = self.runtime_backend(resource_dir, manifest, root / "toolchain")
             self.seal_resource_bundle(resource_dir)
-            for name in ("LD_PRELOAD", "LD_AUDIT"):
+            for name in ("LD_LIBRARY_PATH", "LD_PRELOAD", "LD_AUDIT"):
                 with self.subTest(name=name):
                     secret_value = f"/sensitive/{name.casefold()}-inject.so"
-                    with mock.patch.dict(
-                        "os.environ", {name: secret_value}, clear=True
-                    ):
+                    with mock.patch(
+                        "qazmorph.backend.sys.platform", "linux"
+                    ), mock.patch.dict("os.environ", {name: secret_value}, clear=True):
                         backend.environment = backend._environment()
-                    self.assertEqual(backend.environment[name], secret_value)
+                    if name == "LD_LIBRARY_PATH":
+                        self.assertEqual(
+                            backend.environment[name],
+                            str(backend.toolchain_dir / "usr" / "lib"),
+                        )
+                        self.assertNotIn(secret_value, backend.environment[name])
+                    else:
+                        self.assertNotIn(name, backend.environment)
 
                     with mock.patch("qazmorph.backend.sys.platform", "linux"):
                         provenance = backend.runtime_provenance()
                     identity = provenance["environment"][name]
-                    self.assertEqual(
-                        identity,
-                        {
-                            "present": True,
-                            "sha256": hashlib.sha256(
-                                os.fsencode(secret_value)
-                            ).hexdigest(),
-                        },
-                    )
+                    expected_identity = {
+                        "ambient_present": True,
+                        "removed_from_helper_environment": True,
+                        "sha256": hashlib.sha256(
+                            os.fsencode(secret_value)
+                        ).hexdigest(),
+                    }
+                    if name == "LD_LIBRARY_PATH":
+                        expected_identity.update(
+                            {
+                                "helper_value_source": "manifest-bound-runtime",
+                                "helper_relative_paths": ["usr/lib"],
+                            }
+                        )
+                    self.assertEqual(identity, expected_identity)
                     self.assertNotIn(secret_value, json.dumps(provenance))
                     self.assertFalse(provenance["official"])
                     self.assertIn(
-                        f"ambient {name} is present and can inject unverified code",
+                        f"ambient {name} was present at parent startup; it was removed from helper launches but may already have affected the Python process",
                         provenance["non_official_reasons"],
                     )
 
@@ -1185,11 +1201,12 @@ class ResourceManifestTests(unittest.TestCase):
 
             with mock.patch("qazmorph.backend.sys.platform", "linux"):
                 provenance = backend.runtime_provenance()
-            self.assertEqual(backend.environment["LD_PRELOAD"], ambient_value)
+            self.assertNotIn("LD_PRELOAD", backend.environment)
             self.assertEqual(
                 provenance["environment"]["LD_PRELOAD"],
                 {
-                    "present": True,
+                    "ambient_present": True,
+                    "removed_from_helper_environment": True,
                     "sha256": hashlib.sha256(raw_value).hexdigest(),
                 },
             )
@@ -1302,11 +1319,14 @@ class ResourceManifestTests(unittest.TestCase):
             self.assertTrue(provenance["executables"]["hfst-proc"]["verified"])
 
             backend._ambient_dyld_library_path = "/untrusted/dylibs"
+            backend._ambient_loader_overrides = {
+                "DYLD_LIBRARY_PATH": "/untrusted/dylibs"
+            }
             with mock.patch("qazmorph.backend.sys.platform", "darwin"):
                 injected = backend.runtime_provenance()
             self.assertFalse(injected["official"])
             self.assertIn(
-                "ambient DYLD_LIBRARY_PATH extends the dynamic-library search path",
+                "ambient DYLD_LIBRARY_PATH was present at parent startup; it was removed from helper launches but may already have affected the Python process",
                 injected["non_official_reasons"],
             )
             self.assertNotIn("/untrusted/dylibs", json.dumps(injected))
@@ -1315,16 +1335,27 @@ class ResourceManifestTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             backend = FSTBackend.__new__(FSTBackend)
             backend.toolchain_dir = Path(temporary)
+            hostile = {
+                name: f"/untrusted/{name.casefold()}"
+                for name in LOADER_OVERRIDE_VARIABLES
+            }
             with mock.patch("qazmorph.backend.sys.platform", "darwin"), mock.patch.dict(
                 os.environ,
-                {"DYLD_LIBRARY_PATH": "/untrusted", "DYLD_INSERT_LIBRARIES": "/inject"},
+                hostile,
                 clear=True,
             ):
                 environment = backend._environment()
 
-            self.assertNotIn("LD_LIBRARY_PATH", environment)
-            self.assertEqual(backend._ambient_dyld_library_path, "/untrusted")
-            self.assertEqual(backend._ambient_dyld_insert_libraries, "/inject")
+            for name in LOADER_OVERRIDE_VARIABLES:
+                self.assertNotIn(name, environment)
+            self.assertEqual(
+                backend._ambient_dyld_library_path,
+                hostile["DYLD_LIBRARY_PATH"],
+            )
+            self.assertEqual(
+                backend._ambient_dyld_insert_libraries,
+                hostile["DYLD_INSERT_LIBRARIES"],
+            )
 
     def test_missing_resource_bound_toolchain_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -1522,6 +1553,148 @@ class ResourceManifestTests(unittest.TestCase):
             observed = second._verify_bound_toolchain_inventory()
             self.assertFalse(observed["manifest_read_only"])
             self.assertFalse(observed["sealed_read_only"])
+
+
+    def test_prefix_wide_loader_and_glibc_tunables_are_scrubbed_and_recorded(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            resource_dir = root / "resources"
+            resource_dir.mkdir()
+            manifest = self.write_resource_manifest(
+                resource_dir, RESOURCE_MANIFEST_V3
+            )
+            backend = self.runtime_backend(resource_dir, manifest, root / "toolchain")
+            self.seal_resource_bundle(resource_dir)
+            ambient = {
+                "LD_FUTURE_INJECTOR": "/sensitive/future-ld.so",
+                "DYLD_FUTURE_INJECTOR": "/sensitive/future-dyld.dylib",
+                GLIBC_TUNABLES_VARIABLE: "",
+            }
+            with mock.patch("qazmorph.backend.sys.platform", "linux"), mock.patch.dict(
+                os.environ, ambient, clear=True
+            ):
+                backend.environment = backend._environment()
+            for name in ambient:
+                self.assertNotIn(name, backend.environment)
+
+            with mock.patch("qazmorph.backend.sys.platform", "linux"):
+                provenance = backend.runtime_provenance()
+            policy = provenance["environment"]["loader_policy"]
+            self.assertEqual(
+                policy["schema"],
+                "qazmorph-native-helper-loader-environment-v2",
+            )
+            self.assertEqual(
+                policy["captured_name_policy"],
+                {
+                    "exact_uppercase_prefixes": ["LD_", "DYLD_"],
+                    "exact_names": ["GLIBC_TUNABLES"],
+                },
+            )
+            self.assertFalse(policy["clean_parent_startup"])
+            self.assertTrue(
+                policy["all_ambient_values_removed_from_helper_environment"]
+            )
+            self.assertEqual(
+                set(policy["ambient_records"]),
+                {"LD_FUTURE_INJECTOR", "DYLD_FUTURE_INJECTOR"},
+            )
+            for name in ("LD_FUTURE_INJECTOR", "DYLD_FUTURE_INJECTOR"):
+                self.assertEqual(
+                    policy["ambient_records"][name],
+                    {
+                        "ambient_present": True,
+                        "removed_from_helper_environment": True,
+                        "sha256": hashlib.sha256(
+                            os.fsencode(ambient[name])
+                        ).hexdigest(),
+                    },
+                )
+            self.assertEqual(
+                policy["glibc_tunables"],
+                {
+                    "ambient_present": True,
+                    "removed_from_helper_environment": True,
+                    "sha256": hashlib.sha256(b"").hexdigest(),
+                },
+            )
+            self.assertFalse(provenance["official"])
+            for name in ambient:
+                self.assertTrue(
+                    any(name in reason for reason in provenance["non_official_reasons"])
+                )
+            self.assertNotIn("/sensitive/", json.dumps(provenance))
+
+    def test_loader_prefix_policy_is_exact_uppercase(self) -> None:
+        backend = FSTBackend.__new__(FSTBackend)
+        backend.toolchain_dir = Path("/nonexistent-manifest-bound-toolchain")
+        lower = {"ld_preload": "lower-ld", "dyld_insert_libraries": "lower-dyld"}
+        with mock.patch("qazmorph.backend.sys.platform", "linux"), mock.patch.dict(
+            os.environ, lower, clear=True
+        ):
+            environment = backend._environment()
+        self.assertEqual({name: environment[name] for name in lower}, lower)
+        self.assertEqual(backend._ambient_loader_overrides, {})
+
+    def test_linux_helper_environment_uses_only_manifest_bound_library_dirs(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "usr/lib").mkdir(parents=True)
+            backend = FSTBackend.__new__(FSTBackend)
+            backend.toolchain_dir = root
+            with mock.patch("qazmorph.backend.sys.platform", "linux"), mock.patch.dict(
+                os.environ,
+                {
+                    "LD_LIBRARY_PATH": "/hostile/libs",
+                    "LD_PRELOAD": "/hostile/inject.so",
+                    "LD_AUDIT": "/hostile/audit.so",
+                },
+                clear=True,
+            ):
+                environment = backend._environment()
+
+            self.assertEqual(environment["LD_LIBRARY_PATH"], str(root / "usr/lib"))
+            self.assertNotIn("/hostile", environment["LD_LIBRARY_PATH"])
+            self.assertNotIn("LD_PRELOAD", environment)
+            self.assertNotIn("LD_AUDIT", environment)
+            self.assertEqual(backend._bound_linux_library_paths, ["usr/lib"])
+
+    def test_windows_helper_environment_empties_untrusted_path(self) -> None:
+        backend = FSTBackend.__new__(FSTBackend)
+        with mock.patch("qazmorph.backend.sys.platform", "win32"), mock.patch(
+            "qazmorph.backend._trusted_windows_loader_directories",
+            return_value=(r"C:\Windows\System32", r"C:\Windows"),
+        ), mock.patch.dict(
+            os.environ,
+            {"PATH": r"C:\hostile;C:\Windows\System32;C:\Windows"},
+            clear=True,
+        ):
+            environment = backend._environment()
+
+        self.assertEqual(environment["PATH"], "")
+        self.assertTrue(backend._ambient_windows_path_present)
+        self.assertTrue(backend._ambient_windows_path_risk)
+
+        with mock.patch("qazmorph.backend.sys.platform", "win32"), mock.patch(
+            "qazmorph.backend._trusted_windows_loader_directories",
+            return_value=(r"C:\Windows\System32", r"C:\Windows"),
+        ), mock.patch.dict(
+            os.environ,
+            {"PATH": r"C:\Windows\System32;C:\Windows"},
+            clear=True,
+        ):
+            backend._environment()
+        self.assertFalse(backend._ambient_windows_path_risk)
+
+    def test_windows_absolute_helper_uses_its_own_directory_as_cwd(self) -> None:
+        with mock.patch("qazmorph.backend.sys.platform", "win32"):
+            helper = Path("/trusted/bundle/usr/bin/hfst-proc.exe")
+            self.assertEqual(
+                _helper_working_directory(helper),
+                str(helper.parent),
+            )
+            with self.assertRaises(BackendError):
+                _helper_working_directory(Path("relative-helper.exe"))
 
 
 if __name__ == "__main__":

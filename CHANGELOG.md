@@ -20,6 +20,30 @@ Unified native-runtime and Windows portability release.
 - Falls back to bounded one-shot HFST guessing on Windows because CPython's
   Windows selector cannot wait on anonymous subprocess pipes; POSIX retains
   the faster persistent worker.
+- Removes every exact-uppercase ambient `LD_*`/`DYLD_*` override and
+  `GLIBC_TUNABLES` from every native-helper child. Linux restores only a
+  manifest-derived `LD_LIBRARY_PATH`; macOS helpers rely on the sealed
+  `@rpath` closure. Windows helpers run from their own bound directory with an
+  empty child `PATH`, preventing missing adjacent DLLs or helpers from falling
+  through to an untrusted caller path or cwd.
+- Extends runtime provenance with hashed `ambient_present` and
+  `removed_from_helper_environment` records. A loader override (or untrusted
+  Windows loader path) present when Python started still makes provenance
+  non-official because it may already have affected the parent process.
+- Starts every bounded Windows build/test child suspended, assigns the
+  kill-on-close Job Object, starts bounded capture, and only then resumes it.
+  Every return path proves `ActiveProcesses == 0`; a direct child that leaves
+  descendants is reaped and treated as a failure.
+- Runs the release source suite against an offline installation of the exact
+  canonical wheel and records recomputable discovery/run/success/skip/xfail/
+  unexpected test-ID hashes plus current-process and isolated-child imports.
+- Runs Windows release tools only through an isolated, hash-bound source
+  bootstrap that rejects adjacent bytecode caches before project imports,
+  verifies the complete fresh materialization, and confines pycache state to
+  a fresh external root; unchecked-hash `.pyc` bypasses are regression-tested.
+- Rejects every ambient `GIT_*` control variable, invokes an identity-bound Git
+  executable under a minimal configuration, and hash-binds transitive release
+  helper modules so `PYTHONPATH` or swapped-helper shadowing fails closed.
 - Trusts the historical finiteness-v1 proof only for the exact content-addressed
   f03e resource bundle. Unknown but well-formed v1 bundles remain available for
   nonproductive, nonofficial dictionary rollback; malformed proofs are rejected.

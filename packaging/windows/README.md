@@ -82,3 +82,100 @@ A fresh extraction outside the checkout must prove:
 Corresponding source is a separate checksum-bound asset. The minimized binary
 ZIP must not embed the Project.JJ ZIPs, compiler sources, CPython source,
 PyInstaller sources, or other build archives.
+
+## Final ready-run tooling
+
+The scripts in this directory implement the final candidate gate, but they do
+not publish anything. `.github/workflows/windows-final-release-candidate.yml`
+is intentionally read-only and currently runs only the source-side contract
+suite. It has no permission to create a tag, release, package, or public asset.
+
+The final run starts only from the immutable `refs/tags/v0.2.3` ref and its
+exact commit, tree, and public origin. `materialize_git_source.py` must create
+two absent, mutually non-aliased roots. It emits one deterministic canonical
+Git-archive receipt plus a different live execution receipt for each root.
+The latter binds the checked command and tools and verifies the actual root
+object; published evidence retains logical labels and the non-alias result,
+not host-specific inode numbers.
+
+No Python release tool is launched directly from the checkout. The runner's
+Git-only seed step first creates a fresh, fully inventoried materialization;
+all subsequent tools, including `materialize_git_source.py`, enter through
+`release_bootstrap.py`. The exact interpreter prefix is `-I -B -X
+pycache_prefix=<fresh-external-root>`. The bootstrap requires that cache root
+to be absent and outside the protected source, rejects every adjacent
+`__pycache__` directory and `*.pyc`, `*.pyo`, or `*.pyd` file before importing
+any project module, verifies the complete source-tree identity and live v2
+materialization receipts, and checks both source and cache again after the
+tool exits. `-B` is not treated as sufficient: Python can still read an
+existing unchecked-hash bytecode file. The bootstrap, common verifier,
+process supervisor, path auditor, and source-suite runner are one hash-bound
+support bundle in every generator contract.
+
+`build_python_freezer.py` is the Windows orchestration layer. Its freezer
+wheelhouse is tree-hashed, copied into corresponding source, and installed
+with `--no-index`, an exact `--find-links`, `--require-hashes`, binary-only,
+and no-dependency resolution. The CPython executable is bound by its complete
+file hash and AMD64 PE32+ identity. The selected optimization JSON is bound by
+its exact bytes. Canonical wheel and sdist generation is delegated to the
+shared checked `packaging/build_canonical_python_artifacts.py` implementation;
+there is no Windows-only sdist repacker.
+
+Wheel ZIP bytes depend on the compressor implementation. The canonical wheel
+and sdist therefore come from one fixed, hash-bound build environment. A
+Windows rebuild may claim byte identity only when its Python, build stack, and
+compile/runtime zlib identities exactly match that environment. Otherwise the
+receipt must report package-member and metadata parity while the freezer
+consumes the exact canonical wheel. It must never describe different
+cross-zlib compressed bytes as reproducible. In either mode, the exact
+canonical sdist is safely extracted into a third absent, non-nested root,
+adversarially retimed, rebuilt offline, and audited.
+
+Optimization is measured on the downloadable result. Each distinct PyInstaller
+configuration is assembled twice by `assemble_optimization_candidate.py` in
+independent roots. `select_optimization_candidate.py` requires byte-identical,
+canonical ZIPs for each candidate, behavior-equivalent practical matrices,
+and a separate full rerun of the selected candidate. It selects by final ZIP
+bytes (then deterministic hash/tree/name tie-breaks), reports raw frozen-tree
+bytes separately, and requires the selected ZIP to equal the final ready-run
+artifact identity. Python `-O` and UPX are forbidden.
+
+The final evidence set is generated only by the exact bootstrap and script
+hashes, logical argument vectors (including the isolated external-cache
+prefix), controlled environments, Python executable bytes, fresh source
+materialization identity, source commit/tree/origin/tag, and per-gate coverage
+frozen in the release identity.
+It contains these gates:
+
+1. two independent Python/freezer builds and the third-root sdist roundtrip;
+2. two deterministic final ready-run and corresponding-source ZIP assemblies;
+3. physical and logical archive closure, normalized metadata, checksums, and
+   magic-driven inspection of every nested source archive;
+4. all five output formats, OOV guessing, Constraint Grammar, generation,
+   Unicode/CRLF/NUL/CP1251/malformed input, hostile paths, read-only/offline
+   use, aliases, module CLI, and Python API parity;
+5. missing and PATH-substituted DLL/helper denial, forced provenance rehash,
+   successful-run cleanup, and forced-timeout process-tree cleanup;
+6. suspended child creation, Job assignment before resume, bounded capture,
+   and `ActiveProcesses == 0` on success, timeout, overflow, reader failure,
+   and assignment failure; a surviving descendant is reaped and fails the run;
+7. offline installation of the exact canonical wheel into a fresh non-aliased
+   target, identical current/isolated-child imports, and recomputable hashes of
+   every discovered, run, skipped, expected-failure, and unexpected test ID;
+8. rejection of ambient `GIT_*`, `LD_*`, `DYLD_*`, and `GLIBC_TUNABLES`, an
+   identity-bound Git executable under a minimal environment, and runtime hash
+   verification of every transitive release helper; Git additionally uses
+   `GIT_NO_REPLACE_OBJECTS=1`, disables fsmonitor and the untracked cache with
+   checked `-c` arguments, and cannot inherit work-tree/object-directory
+   redirections;
+9. repeated deterministic large outputs, startup timing, process-tree peak
+   working set, and explicit performance thresholds;
+10. every PE's native Authenticode status plus the unsigned/SmartScreen notice;
+11. exact source closure, licenses and URLs, with OpenSSL, network/TLS modules,
+   neural assets, source archives, and installers absent from the ready-run.
+
+`finalize_release.py` is fail-closed: it verifies all live roots and receipts,
+reassembles both public ZIPs, compares their bytes, validates every strict
+evidence envelope, and writes `FINALIZATION.json` with
+`publishing_performed: false`. Uploading assets is a separate, reviewable step
+outside this tooling.

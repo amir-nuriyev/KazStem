@@ -39,6 +39,38 @@ toolchain behavior. Once an entry matches, a missing or changed detached
 runtime fails closed. KazStem does not search a home-directory cache, ambient
 `PATH`, or a release-only hidden path for an official detached runtime.
 
+## Native-helper loader isolation and provenance
+
+Every helper command is selected by an absolute, manifest-bound path. Before a
+helper starts, KazStem removes every environment name with the exact-uppercase
+`LD_` or `DYLD_` prefix, including names introduced by a future loader, and
+removes `GLIBC_TUNABLES`. Linux then restores only `LD_LIBRARY_PATH`,
+constructed solely from existing manifest-bound runtime directories. macOS
+relies on the sealed `@rpath` closure. On Windows the child `PATH` is empty and
+each helper's working directory is its own bound parent directory, so a
+missing adjacent DLL or executable cannot fall through to the caller's `PATH`
+or working directory.
+
+Sanitizing a child cannot undo injection that may have happened before Python
+started. Runtime provenance therefore keeps `official=false` when a relevant
+ambient loader override was present at parent startup, or when the Windows
+startup `PATH` included a directory other than the Windows and System32
+directories obtained from the Win32 API. Values are never disclosed: each
+loader record contains `ambient_present`, `removed_from_helper_environment`,
+and a SHA-256 digest or `null`. The Linux `LD_LIBRARY_PATH` record additionally
+contains `helper_value_source="manifest-bound-runtime"` and portable
+`helper_relative_paths`; it never embeds an extraction path. The Windows
+`PATH` record reports `ambient_present`, `ambient_untrusted`, and
+`removed_from_helper_environment`.
+
+The `loader_policy` object uses schema
+`qazmorph-native-helper-loader-environment-v2`. Its `ambient_records` map
+contains every captured prefix-wide name with a value hash (including an empty
+value), while `glibc_tunables` records that exact variable separately.
+`clean_parent_startup` is true only when none were present. This is a parent
+startup claim: child scrubbing cannot make an already injected process
+official.
+
 ## macOS arm64 v0.2.3 runtime
 
 The source inputs, URLs, byte lengths, SHA-256 values, command versions, and
@@ -57,8 +89,9 @@ python3 scripts/write_platform_runtime_manifest.py \
 The helper binaries are thin Apple arm64 Mach-O files. Their non-system dylibs
 are copied into `usr/lib` and resolved with bundle-relative rpaths. Apple
 `libSystem` and `libc++` remain host System Libraries, so the bundle is not a
-byte-closed operating-system image. `DYLD_LIBRARY_PATH` or
-`DYLD_INSERT_LIBRARIES` makes runtime provenance non-official.
+byte-closed operating-system image. Any supported ambient `DYLD_*` loader
+override at parent startup makes runtime provenance non-official even though it
+is removed from subsequent helper launches.
 Although the top-level HFST/CG executables declare macOS 11.0, the recursive
 non-system closure includes dylibs declaring macOS 14.0. The runtime lock
 therefore records 14.0 as its truthful minimum; the final frozen launcher may
@@ -140,6 +173,14 @@ Windows remains f03e-only. Productive bf1f is pending the real Windows build,
 PE-closure audit, bounded one-shot protocol suite, and practical behavior
 matrix; no capability is inferred from the Linux acceptance result.
 
+Release-tool Python is also treated as part of the native release boundary.
+Every official Windows tool runs from a complete, receipt-bound fresh source
+materialization through `release_bootstrap.py` under `-I -B -X
+pycache_prefix=<fresh-external-root>`. Before any local import, the bootstrap
+rejects `__pycache__` and `*.py[cod]`, including unchecked-hash bytecode that
+`-B` alone would still read. It verifies the whole source inventory and checks
+that the external cache remains empty after execution.
+
 Windows cannot portably preserve a denying directory ACL through an ordinary
 ZIP. Runtime provenance therefore does not reinterpret Windows `READONLY`
 attributes as POSIX permissions: `sealed_read_only` remains false, the cache is
@@ -160,6 +201,12 @@ Windows ZIP extraction does not supply a portable POSIX executable bit, and
 `os.access(path, os.X_OK)` is therefore evidence only. Helper availability is
 proved by a regular `.exe` entry, exact manifest/hash identity, and successful
 native version execution before the helper is accepted.
+
+Windows helper probes, analysis, generation, CG, and productive guessing all
+use the helper's manifest-bound parent as `cwd` and an empty child `PATH`.
+Release testing removes each adjacent DLL/helper in turn and proves that
+hostile copies in both the caller `PATH` and caller cwd are denied, that the
+restored adjacent closure succeeds, and that no descendant process remains.
 
 The ready-run ZIP is unsigned: no Authenticode publisher signature, timestamp,
 or SmartScreen reputation is claimed. The release notes must say this plainly;
