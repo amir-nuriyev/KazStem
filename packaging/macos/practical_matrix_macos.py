@@ -103,7 +103,7 @@ with Analyzer(resource_dir=resource_dir, guess=True) as analyzer:
         assert forbidden not in forms
         cases += 1
 
-    diagnostics = analyzer.generation_diagnostics()
+    diagnostics = analyzer.generation_diagnostics
     assert diagnostics["productive_available"] == 1
     assert diagnostics["productive_queries"] >= 1
     assert diagnostics["productive_hits"] >= 1
