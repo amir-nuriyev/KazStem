@@ -4,20 +4,27 @@
 import os
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_data_files
 
-
-entrypoint = Path(os.environ["KAZSTEM_ENTRYPOINT"]).resolve(strict=True)
+entrypoint = Path(os.environ["KAZSTEM_FROZEN_BOOTSTRAP"]).resolve(strict=True)
+wheel = Path(os.environ["KAZSTEM_CANONICAL_WHEEL"]).resolve(strict=True)
+if not wheel.name.startswith("kazstem-") or not wheel.name.endswith("-py3-none-any.whl"):
+    raise SystemExit("KAZSTEM_CANONICAL_WHEEL has a noncanonical filename")
 optimize = int(os.environ.get("KAZSTEM_PYTHON_OPTIMIZE", "0"))
 
-datas = collect_data_files("qazmorph")
+# Keep the exact canonical wheel as the sole qazmorph import source.  This
+# makes wheel consumption independently byte-auditable after freezing; the
+# bootstrap inserts the wheel into sys.path before importing qazmorph.cli.
+datas = [(str(wheel), ".")]
 
 a = Analysis(
     [str(entrypoint)],
-    pathex=[],
+    # Analyze the exact wheel to retain its transitive stdlib dependency
+    # closure.  The qazmorph modules themselves are removed from the PYZ below
+    # so runtime imports still come exclusively from the embedded wheel bytes.
+    pathex=[str(wheel)],
     binaries=[],
     datas=datas,
-    hiddenimports=[],
+    hiddenimports=["qazmorph.cli"],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -51,6 +58,11 @@ a = Analysis(
 # KazStem does not use inspect source retrieval.  Removing this runtime hook
 # also avoids pulling the generic archive/source-inspection stack back in.
 a.scripts = [entry for entry in a.scripts if entry[0] != "pyi_rth_inspect"]
+a.pure = [
+    entry
+    for entry in a.pure
+    if entry[0] != "qazmorph" and not entry[0].startswith("qazmorph.")
+]
 
 pyz = PYZ(a.pure)
 exe = EXE(

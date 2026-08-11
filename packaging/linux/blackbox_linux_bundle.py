@@ -324,8 +324,10 @@ def main() -> int:
         identity["release"],
         resource_manifest["version"],
     ).execute()
+    summary["pass"] = True
     summary["release"] = identity["release"]
     summary["source_commit"] = identity["source_commit"]
+    summary["source_tree"] = identity["source_tree"]
     value = json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     if args.json:
         args.json.write_text(value, encoding="utf-8")

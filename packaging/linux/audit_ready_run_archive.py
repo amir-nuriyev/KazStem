@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import tempfile
 from typing import Any
 
 from release_common import (
@@ -13,18 +14,24 @@ from release_common import (
     ReleaseError,
     archive_limits,
     assert_relative_evidence,
+    compression_target,
     ensure_output_outside,
+    ensure_distinct_nonaliased_paths,
     extract_validated_tar,
     identity_sha256,
     inspect_tar,
+    materialize_uncompressed_tar,
     json_bytes,
     load_identity,
     parse_checksums,
+    portable_path,
     read_json,
     ready_source_binding,
+    selected_compression,
     regular_files,
     sha256_file,
     verify_artifact,
+    verify_declared_archive_inventory,
     verify_file,
     verify_manifest_completeness,
     verify_outer_archive_completeness,
@@ -63,6 +70,11 @@ def _manifest_bundle(
 
 
 def audit(args: argparse.Namespace) -> dict[str, Any]:
+    ensure_distinct_nonaliased_paths(
+        args.output,
+        args.fresh_root,
+        labels=("ready audit output", "fresh extraction root"),
+    )
     ensure_output_outside(args.output, args.fresh_root, label="ready-run audit output")
     if args.output.exists() or args.output.is_symlink():
         raise ReleaseError(f"audit output already exists: {args.output}")
@@ -79,8 +91,27 @@ def audit(args: argparse.Namespace) -> dict[str, Any]:
         limits=archive_limits(identity, "ready_run"),
         expected_top=ready["top_level"],
     )
-    root = extract_validated_tar(archive, args.fresh_root.absolute(), members=members)
-    verify_sealed_archive_modes(members)
+    compression = compression_target(identity, "ready_run")
+    with tempfile.TemporaryDirectory(prefix="kazstem-ready-raw-audit-") as temporary:
+        raw_tar = Path(temporary) / compression["input"]["filename"]
+        materialize_uncompressed_tar(
+            archive,
+            raw_tar,
+            compression=selected_compression(identity, "ready_run"),
+            expected=compression["input"],
+        )
+        if inspect_tar(
+            raw_tar,
+            limits=archive_limits(identity, "ready_run"),
+            expected_top=ready["top_level"],
+        ) != members:
+            raise ReleaseError("ready container differs from canonical raw tar")
+    root = extract_validated_tar(
+        archive,
+        args.fresh_root.absolute(),
+        members=members,
+        limits=archive_limits(identity, "ready_run"),
+    )
     verify_outer_archive_completeness(members, root, top_level=ready["top_level"])
     checksum_entries = _verify_checksums(root, "verification/BUNDLED-FILES.sha256")
 
@@ -90,13 +121,14 @@ def audit(args: argparse.Namespace) -> dict[str, Any]:
         "schema",
         "release",
         "source_commit",
+        "executable_paths",
         "files",
         "symlinks",
         "directories",
     }:
         raise ReleaseError("invalid ready-run bundle manifest structure")
     if (
-        manifest["schema"] != "kazstem-linux-ready-run-manifest-v1"
+        manifest["schema"] != "kazstem-linux-ready-run-manifest-v2"
         or manifest["release"] != identity["release"]
         or manifest["source_commit"] != identity["source_commit"]
     ):
@@ -107,6 +139,29 @@ def audit(args: argparse.Namespace) -> dict[str, Any]:
         excluded_files={
             "verification/BUNDLE-MANIFEST.json",
             "verification/BUNDLED-FILES.sha256",
+        },
+    )
+    raw_executable_paths = manifest["executable_paths"]
+    if not isinstance(raw_executable_paths, list):
+        raise ReleaseError("ready-run executable path inventory is not a list")
+    executable_paths = [
+        portable_path(value, label="ready-run executable path")
+        for value in raw_executable_paths
+    ]
+    if executable_paths != sorted(set(executable_paths)):
+        raise ReleaseError(
+            "ready-run executable paths must be sorted and unique"
+        )
+    for relative in executable_paths:
+        path = root / relative
+        if not path.is_file() or path.is_symlink():
+            raise ReleaseError(
+                f"ready-run executable path does not name a file: {relative}"
+            )
+    verify_sealed_archive_modes(
+        members,
+        executable_paths={
+            f"{ready['top_level']}/{relative}" for relative in executable_paths
         },
     )
     binding = read_json(root / "CORRESPONDING-SOURCE.json")
@@ -143,32 +198,23 @@ def audit(args: argparse.Namespace) -> dict[str, Any]:
         ):
             raise ReleaseError(f"ready-run alias differs from identity: {alias}")
     banned: list[str] = []
-    nested: list[str] = []
     for path in root.rglob("*"):
         relative = path.relative_to(root).as_posix()
         basename = path.name.casefold()
         if any(fragment in basename for fragment in ready["banned_name_fragments"]):
             banned.append(relative)
-        if path.is_file() and basename.endswith(
-            (
-                ".tar",
-                ".tar.gz",
-                ".tar.bz2",
-                ".tar.xz",
-                ".tgz",
-                ".tbz2",
-                ".whl",
-                ".zip",
-                ".deb",
-            )
-        ):
-            nested.append(relative)
     if banned:
         raise ReleaseError(f"banned ready-run entries: {sorted(banned)}")
-    if nested:
-        raise ReleaseError(
-            f"source/build archives are forbidden in ready-run: {sorted(nested)}"
+    for item in ready["nested_archives"]:
+        verify_file(
+            root / item["path"],
+            {"bytes": item["bytes"], "sha256": item["sha256"]},
+            label="ready-run embedded canonical wheel",
         )
+    verify_declared_archive_inventory(
+        root,
+        {item["path"]: item["format"] for item in ready["nested_archives"]},
+    )
     assert_relative_evidence(root / "verification")
 
     result = {
@@ -188,6 +234,7 @@ def audit(args: argparse.Namespace) -> dict[str, Any]:
         "duplicate_case_ads_special_checks": "pass",
         "completeness": "pass",
         "relative_evidence": True,
+        "canonical_uncompressed_tar": compression["input"],
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_bytes(json_bytes(result))

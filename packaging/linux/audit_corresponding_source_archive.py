@@ -4,9 +4,14 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import os
 from pathlib import Path
 import re
+import stat
+import tarfile
+import tempfile
 from typing import Any
 import unicodedata
 
@@ -16,11 +21,14 @@ from release_common import (
     archive_limits,
     assert_relative_evidence,
     canonical_hash,
+    compression_target,
     ensure_output_outside,
+    ensure_distinct_nonaliased_paths,
     extract_validated_tar,
     identity_sha256,
     inspect_nested,
     inspect_tar,
+    materialize_uncompressed_tar,
     json_bytes,
     load_identity,
     parse_checksums,
@@ -29,7 +37,9 @@ from release_common import (
     regular_files,
     sha256_file,
     source_identity_projection,
+    selected_compression,
     tree_inventory,
+    verify_declared_archive_inventory,
     verify_artifact,
     verify_file,
     verify_manifest_completeness,
@@ -37,19 +47,6 @@ from release_common import (
     verify_required_paths,
     verify_sealed_archive_modes,
     verify_source_contract,
-)
-
-
-ARCHIVE_SUFFIXES = (
-    ".tar",
-    ".tar.gz",
-    ".tar.bz2",
-    ".tar.xz",
-    ".tgz",
-    ".tbz2",
-    ".whl",
-    ".zip",
-    ".deb",
 )
 
 
@@ -74,7 +71,7 @@ def _verify_checksums(root: Path) -> int:
 
 def _verify_payload_inventory(
     identity: dict[str, Any], manifest: dict[str, Any], root: Path
-) -> None:
+) -> set[str]:
     inventory = manifest.get("payload_inventory")
     if not isinstance(inventory, list):
         raise ReleaseError("source manifest lacks the original payload inventory")
@@ -96,6 +93,7 @@ def _verify_payload_inventory(
         if (
             not isinstance(item["mode"], str)
             or re.fullmatch(r"[0-7]{4}", item["mode"]) is None
+            or int(item["mode"], 8) & 0o7000
         ):
             raise ReleaseError(f"invalid source payload mode at row {index}")
         if kind == "file" and (
@@ -132,6 +130,7 @@ def _verify_payload_inventory(
         "SOURCE-MANIFEST.json",
         "SHA256SUMS",
         "python-artifacts",
+        identity["corresponding_source"]["source_categories"]["application_source"],
     }
     declared_paths = {item["path"] for item in inventory}
     observed_paths = {
@@ -167,9 +166,116 @@ def _verify_payload_inventory(
                 raise ReleaseError(f"source payload directory mismatch: {item['path']}")
         else:
             raise ReleaseError("invalid source payload inventory kind")
+    top_level = identity["corresponding_source"]["top_level"]
+    return {
+        f"{top_level}/{item['path']}"
+        for item in inventory
+        if item["kind"] == "file" and int(item["mode"], 8) & 0o111
+    }
+
+
+def _verify_embedded_git_tree(
+    identity: dict[str, Any], root: Path
+) -> tuple[int, set[str]]:
+    source = identity["corresponding_source"]
+    application = root / source["source_categories"]["application_source"]
+    archive_path = root / source["git_archive_file"]
+    members = inspect_tar(
+        archive_path,
+        limits=archive_limits(identity, "nested"),
+        expected_top="tree",
+    )
+    expected_paths: set[str] = set()
+    executable_paths: set[str] = set()
+    by_name = {member.name: member for member in members}
+    with tarfile.open(archive_path, "r:*") as archive:
+        raw = {member.name.rstrip("/"): member for member in archive}
+        if set(raw) != set(by_name):
+            raise ReleaseError("embedded Git archive changed during verification")
+        for member in members:
+            parts = list(Path(member.name).parts)
+            if not parts or parts[0] != "tree":
+                raise ReleaseError("embedded Git archive has an unexpected root")
+            relative = Path(*parts[1:]) if len(parts) > 1 else Path()
+            target = application / "tree" / relative
+            logical = (Path("tree") / relative).as_posix()
+            expected_paths.add(logical)
+            if member.kind == "file" and member.mode & 0o111:
+                executable_paths.add(
+                    f"{source['top_level']}/{source['source_categories']['application_source']}/{logical}"
+                )
+            metadata = target.lstat()
+            expected_mode = (
+                0o555
+                if member.kind == "directory"
+                else (
+                    0o777
+                    if member.kind == "symlink"
+                    else (0o555 if member.mode & 0o111 else 0o444)
+                )
+            )
+            if stat.S_IMODE(metadata.st_mode) != expected_mode:
+                raise ReleaseError(
+                    f"embedded Git tree mode mismatch: {logical}"
+                )
+            if member.kind == "file":
+                if not target.is_file() or target.is_symlink():
+                    raise ReleaseError(f"embedded Git tree file missing: {logical}")
+                stream = archive.extractfile(raw[member.name])
+                if stream is None:
+                    raise ReleaseError(f"cannot read embedded Git member: {logical}")
+                digest = hashlib.sha256()
+                size = 0
+                for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                    size += len(chunk)
+                    digest.update(chunk)
+                if size != target.stat().st_size or digest.hexdigest() != sha256_file(
+                    target
+                ):
+                    raise ReleaseError(f"embedded Git tree bytes differ: {logical}")
+            elif member.kind == "directory":
+                if not target.is_dir() or target.is_symlink():
+                    raise ReleaseError(
+                        f"embedded Git tree directory missing: {logical}"
+                    )
+            elif member.kind == "symlink":
+                if not target.is_symlink() or os.readlink(target) != member.linkname:
+                    raise ReleaseError(f"embedded Git tree link differs: {logical}")
+    observed_paths = {
+        f"tree/{item['path']}" for item in tree_inventory(application / "tree")
+    } | {"tree"}
+    if observed_paths != expected_paths:
+        raise ReleaseError(
+            "expanded Git tree is incomplete "
+            f"(missing={sorted(expected_paths - observed_paths)}, "
+            f"extra={sorted(observed_paths - expected_paths)})"
+        )
+    metadata_path = application / "GIT-SOURCE.json"
+    observed_metadata = read_json(metadata_path)
+    expected_metadata = {
+        "schema": "kazstem-git-source-materialization-v1",
+        "source_commit": identity["source_commit"],
+        "source_tree": identity["source_tree"],
+        "source_origin": identity["source_origin"],
+        "source_ref": identity["source_ref"],
+        "archive": {
+            "filename": Path(source["git_archive_file"]).name,
+            **identity["inputs"]["git_archive"]["file"],
+        },
+        "argv": identity["inputs"]["git_archive"]["argv"],
+        "tool_version": identity["inputs"]["git_archive"]["tool_version"],
+    }
+    if observed_metadata != expected_metadata:
+        raise ReleaseError("embedded Git source materialization metadata differs")
+    return len(members), executable_paths
 
 
 def audit(args: argparse.Namespace) -> dict[str, Any]:
+    ensure_distinct_nonaliased_paths(
+        args.output,
+        args.fresh_root,
+        labels=("source audit output", "fresh extraction root"),
+    )
     ensure_output_outside(args.output, args.fresh_root, label="source audit output")
     if args.output.exists() or args.output.is_symlink():
         raise ReleaseError(f"audit output already exists: {args.output}")
@@ -187,8 +293,27 @@ def audit(args: argparse.Namespace) -> dict[str, Any]:
         limits=archive_limits(identity, "corresponding_source"),
         expected_top=source["top_level"],
     )
-    root = extract_validated_tar(archive, args.fresh_root.absolute(), members=members)
-    verify_sealed_archive_modes(members)
+    compression = compression_target(identity, "corresponding_source")
+    with tempfile.TemporaryDirectory(prefix="kazstem-source-raw-audit-") as temporary:
+        raw_tar = Path(temporary) / compression["input"]["filename"]
+        materialize_uncompressed_tar(
+            archive,
+            raw_tar,
+            compression=selected_compression(identity, "corresponding_source"),
+            expected=compression["input"],
+        )
+        if inspect_tar(
+            raw_tar,
+            limits=archive_limits(identity, "corresponding_source"),
+            expected_top=source["top_level"],
+        ) != members:
+            raise ReleaseError("source container differs from canonical raw tar")
+    root = extract_validated_tar(
+        archive,
+        args.fresh_root.absolute(),
+        members=members,
+        limits=archive_limits(identity, "corresponding_source"),
+    )
     verify_outer_archive_completeness(members, root, top_level=source["top_level"])
     checksum_entries = _verify_checksums(root)
     projection = read_json(root / "SOURCE-IDENTITY.json")
@@ -201,7 +326,11 @@ def audit(args: argparse.Namespace) -> dict[str, Any]:
         "schema",
         "release",
         "source_commit",
+        "source_tree",
+        "source_origin",
+        "source_ref",
         "source_date_epoch",
+        "git_source_materialization",
         "source_identity_sha256",
         "payload_tree",
         "payload_inventory",
@@ -213,9 +342,12 @@ def audit(args: argparse.Namespace) -> dict[str, Any]:
     if not isinstance(manifest, dict) or set(manifest) != expected_fields:
         raise ReleaseError("invalid corresponding-source manifest structure")
     if (
-        manifest["schema"] != "kazstem-linux-corresponding-source-manifest-v2"
+        manifest["schema"] != "kazstem-linux-corresponding-source-manifest-v3"
         or manifest["release"] != identity["release"]
         or manifest["source_commit"] != identity["source_commit"]
+        or manifest["source_tree"] != identity["source_tree"]
+        or manifest["source_origin"] != identity["source_origin"]
+        or manifest["source_ref"] != identity["source_ref"]
         or manifest["source_date_epoch"] != identity["source_date_epoch"]
         or manifest["payload_tree"] != identity["inputs"]["source_payload_tree"]
         or manifest["nested_archives"] != source["nested_archives"]
@@ -228,7 +360,17 @@ def audit(args: argparse.Namespace) -> dict[str, Any]:
         manifest,
         excluded_files={"SOURCE-MANIFEST.json", "SHA256SUMS"},
     )
-    _verify_payload_inventory(identity, manifest, root)
+    executable_paths = _verify_payload_inventory(identity, manifest, root)
+    git_members, git_executable_paths = _verify_embedded_git_tree(identity, root)
+    verify_sealed_archive_modes(
+        members, executable_paths=executable_paths | git_executable_paths
+    )
+    if manifest["git_source_materialization"] != read_json(
+        root
+        / source["source_categories"]["application_source"]
+        / "GIT-SOURCE.json"
+    ):
+        raise ReleaseError("source manifest Git materialization binding differs")
     verify_required_paths(root, source["required_paths"])
     verify_source_contract(root, identity)
     assert_relative_evidence(root / source["evidence_root"])
@@ -255,17 +397,11 @@ def audit(args: argparse.Namespace) -> dict[str, Any]:
         label="embedded canonical sdist",
     )
 
-    detected = {
-        path.relative_to(root).as_posix()
-        for path in regular_files(root)
-        if path.name.casefold().endswith((*ARCHIVE_SUFFIXES, ".gz"))
-    }
+    verify_declared_archive_inventory(
+        root,
+        {relative: record["format"] for relative, record in nested_by_path.items()},
+    )
     declared = set(nested_by_path)
-    if detected != declared:
-        raise ReleaseError(
-            "nested archive inventory is incomplete "
-            f"(undeclared={sorted(detected - declared)}, missing={sorted(declared - detected)})"
-        )
     nested_results: list[dict[str, Any]] = []
     limits = archive_limits(identity, "nested")
     if len(declared) > limits.max_members:
@@ -278,7 +414,20 @@ def audit(args: argparse.Namespace) -> dict[str, Any]:
             {"bytes": record["bytes"], "sha256": record["sha256"]},
             label=f"nested archive {relative}",
         )
-        details = inspect_nested(root / relative, record["format"], limits=limits)
+        zstd_tool = next(
+            (
+                item
+                for item in identity["verification"]["reproducibility"]["tools"]
+                if item["name"] == "zstd"
+            ),
+            None,
+        )
+        details = inspect_nested(
+            root / relative,
+            record["format"],
+            limits=limits,
+            zstd_tool=zstd_tool,
+        )
         expanded = details.get("expanded_bytes")
         if not isinstance(expanded, int) or expanded < 0:
             raise ReleaseError(
@@ -298,6 +447,8 @@ def audit(args: argparse.Namespace) -> dict[str, Any]:
         "pass": True,
         "release": identity["release"],
         "source_commit": identity["source_commit"],
+        "source_tree": identity["source_tree"],
+        "source_ref": identity["source_ref"],
         "identity_contract_sha256": identity_sha256(identity_path),
         "archive": identity["artifacts"]["corresponding_source"],
         "top_level": source["top_level"],
@@ -309,6 +460,9 @@ def audit(args: argparse.Namespace) -> dict[str, Any]:
         "nested_archives": nested_results,
         "nested_expanded_bytes": total_expanded,
         "nested_archives_pass": True,
+        "git_archive_members": git_members,
+        "git_archive_tree_exact": True,
+        "canonical_uncompressed_tar": compression["input"],
         "duplicate_case_ads_special_checks": "pass",
         "completeness": "pass",
         "relative_evidence": True,

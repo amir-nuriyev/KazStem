@@ -15,13 +15,17 @@ from release_common import (
     assert_relative_evidence,
     checksum_rows,
     ensure_output_outside,
+    ensure_distinct_nonaliased_paths,
     file_record,
     json_bytes,
     load_identity,
     manifest_entry_records,
     normalize_tree,
+    produce_canonical_tar_with_receipt,
     read_json,
     ready_source_binding,
+    selected_compression,
+    tar_producer_logical_argv,
     render_template,
     tree_inventory,
     verify_artifact,
@@ -29,7 +33,7 @@ from release_common import (
     verify_or_observe_output,
     verify_required_paths,
     verify_tree,
-    write_deterministic_tar_xz,
+    write_deterministic_tar_archive,
 )
 
 
@@ -56,6 +60,11 @@ def _copy_document(
 def assemble(args: argparse.Namespace) -> dict[str, Any]:
     ensure_output_outside(args.output, args.work_root, label="ready-run archive output")
     if args.observation:
+        ensure_distinct_nonaliased_paths(
+            args.output,
+            args.observation,
+            labels=("ready-run archive output", "observation output"),
+        )
         ensure_output_outside(
             args.observation, args.work_root, label="ready-run observation"
         )
@@ -245,6 +254,16 @@ def assemble(args: argparse.Namespace) -> dict[str, Any]:
     if banned_matches:
         raise ReleaseError(f"banned ready-run entries: {sorted(banned_matches)}")
 
+    executable_paths: set[str] = {launcher_relative}
+    for source_root, destination in (
+        (frozen, ""),
+        (runtime, f"{ready['runtime_parent']}/{expected['runtime_tree']['bundle_id']}"),
+        (resources, ready["resource_destination"]),
+    ):
+        for item in tree_inventory(source_root):
+            if item["kind"] == "file" and int(item["mode"], 8) & 0o111:
+                executable_paths.add(f"{destination}/{item['path']}".lstrip("/"))
+
     manifest_path = verification / "BUNDLE-MANIFEST.json"
     files, links, directories = manifest_entry_records(
         root,
@@ -256,9 +275,10 @@ def assemble(args: argparse.Namespace) -> dict[str, Any]:
     manifest_path.write_bytes(
         json_bytes(
             {
-                "schema": "kazstem-linux-ready-run-manifest-v1",
+                "schema": "kazstem-linux-ready-run-manifest-v2",
                 "release": identity["release"],
                 "source_commit": identity["source_commit"],
+                "executable_paths": sorted(executable_paths),
                 "files": files,
                 "symlinks": links,
                 "directories": directories,
@@ -274,15 +294,6 @@ def assemble(args: argparse.Namespace) -> dict[str, Any]:
     verify_required_paths(root, ready["required_paths"])
     assert_relative_evidence(verification)
 
-    executable_paths: set[str] = {launcher_relative}
-    for source_root, destination in (
-        (frozen, ""),
-        (runtime, f"{ready['runtime_parent']}/{expected['runtime_tree']['bundle_id']}"),
-        (resources, ready["resource_destination"]),
-    ):
-        for item in tree_inventory(source_root):
-            if item["kind"] == "file" and int(item["mode"], 8) & 0o111:
-                executable_paths.add(f"{destination}/{item['path']}".lstrip("/"))
     normalize_tree(
         root, epoch=identity["source_date_epoch"], executable_paths=executable_paths
     )
@@ -290,12 +301,31 @@ def assemble(args: argparse.Namespace) -> dict[str, Any]:
     output = args.output.absolute()
     if output.name != artifacts["ready_run"]["filename"]:
         raise ReleaseError("ready-run output path does not use the identity filename")
-    write_deterministic_tar_xz(
-        root,
-        output,
-        epoch=identity["source_date_epoch"],
-        limits=archive_limits(identity, "ready_run"),
-    )
+    raw_tar_output = getattr(args, "raw_tar_output", None)
+    producer_receipt = getattr(args, "producer_receipt", None)
+    if (raw_tar_output is None) is not (producer_receipt is None):
+        raise ReleaseError("raw tar output and producer receipt must be requested together")
+    if raw_tar_output is not None:
+        produce_canonical_tar_with_receipt(
+            root,
+            output,
+            raw_tar_output,
+            producer_receipt,
+            identity_path=identity_path,
+            identity=identity,
+            artifact="ready_run",
+            producer_argv=tar_producer_logical_argv(
+                identity, "ready_run", raw_tar_output.name
+            ),
+        )
+    else:
+        write_deterministic_tar_archive(
+            root,
+            output,
+            epoch=identity["source_date_epoch"],
+            limits=archive_limits(identity, "ready_run"),
+            compression=selected_compression(identity, "ready_run"),
+        )
     verify_or_observe_output(
         output,
         artifacts["ready_run"],
@@ -332,6 +362,8 @@ def main() -> int:
     parser.add_argument("--work-root", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--observation", type=Path)
+    parser.add_argument("--raw-tar-output", type=Path)
+    parser.add_argument("--producer-receipt", type=Path)
     args = parser.parse_args()
     result = assemble(args)
     print(json.dumps(result, indent=2, sort_keys=True))

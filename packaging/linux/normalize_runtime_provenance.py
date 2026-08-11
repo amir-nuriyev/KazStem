@@ -15,8 +15,30 @@ from release_common import (
     ensure_output_outside,
     json_bytes,
     load_identity,
+    portable_path,
     read_json,
 )
+
+
+LOADER_OVERRIDE_VARIABLES = (
+    "LD_LIBRARY_PATH",
+    "LD_PRELOAD",
+    "LD_AUDIT",
+    "DYLD_LIBRARY_PATH",
+    "DYLD_INSERT_LIBRARIES",
+    "DYLD_FRAMEWORK_PATH",
+    "DYLD_FALLBACK_FRAMEWORK_PATH",
+    "DYLD_FALLBACK_LIBRARY_PATH",
+    "DYLD_IMAGE_SUFFIX",
+    "DYLD_ROOT_PATH",
+    "DYLD_SHARED_REGION",
+    "DYLD_PRINT_TO_FILE",
+)
+ABSENT_LOADER_RECORD = {
+    "ambient_present": False,
+    "removed_from_helper_environment": True,
+    "sha256": None,
+}
 
 
 def _is_absolute(value: str) -> bool:
@@ -55,6 +77,66 @@ def _normalize(value: Any, bundle_root: Path) -> Any:
     return value
 
 
+def _validate_clean_loader_policy(raw: dict[str, Any]) -> None:
+    environment = raw.get("environment")
+    if not isinstance(environment, dict):
+        raise ReleaseError("runtime provenance has no environment record")
+    policy = environment.get("loader_policy")
+    if not isinstance(policy, dict) or set(policy) != {
+        "all_ambient_values_removed_from_helper_environment",
+        "ambient_records",
+        "captured_name_policy",
+        "clean_parent_startup",
+        "glibc_tunables",
+        "linux_helper_ld_library_path",
+        "schema",
+    }:
+        raise ReleaseError("runtime provenance loader policy shape differs")
+    if (
+        policy["schema"] != "qazmorph-native-helper-loader-environment-v2"
+        or policy["captured_name_policy"]
+        != {
+            "exact_uppercase_prefixes": ["LD_", "DYLD_"],
+            "exact_names": ["GLIBC_TUNABLES"],
+        }
+        or policy["ambient_records"] != {}
+        or policy["glibc_tunables"] != ABSENT_LOADER_RECORD
+        or policy["clean_parent_startup"] is not True
+        or policy["all_ambient_values_removed_from_helper_environment"] is not True
+    ):
+        raise ReleaseError("runtime provenance does not prove a clean parent/helper environment")
+    linux_library_path = policy["linux_helper_ld_library_path"]
+    if not isinstance(linux_library_path, dict) or set(linux_library_path) != {
+        "relative_paths",
+        "source",
+    }:
+        raise ReleaseError("runtime provenance has no bound Linux helper library path")
+    relative_paths = linux_library_path["relative_paths"]
+    if (
+        linux_library_path["source"] != "manifest-bound-runtime"
+        or not isinstance(relative_paths, list)
+        or len(relative_paths) != len(set(relative_paths))
+    ):
+        raise ReleaseError("Linux helper library-path binding differs")
+    for index, value in enumerate(relative_paths):
+        portable_path(value, label=f"Linux helper library path[{index}]")
+    for name in LOADER_OVERRIDE_VARIABLES:
+        expected = dict(ABSENT_LOADER_RECORD)
+        if name == "LD_LIBRARY_PATH":
+            expected.update(
+                {
+                    "helper_relative_paths": relative_paths,
+                    "helper_value_source": "manifest-bound-runtime",
+                }
+            )
+        if environment.get(name) != expected:
+            raise ReleaseError(
+                f"runtime provenance does not prove a clean helper environment for {name}"
+            )
+    if environment.get("GLIBC_TUNABLES") != ABSENT_LOADER_RECORD:
+        raise ReleaseError("runtime provenance does not prove clean GLIBC_TUNABLES")
+
+
 def normalize(args: argparse.Namespace) -> dict[str, Any]:
     ensure_output_outside(
         args.output, args.bundle_root, label="normalized provenance output"
@@ -80,6 +162,7 @@ def normalize(args: argparse.Namespace) -> dict[str, Any]:
         raise ReleaseError(
             "runtime provenance input is not official and fully verified"
         )
+    _validate_clean_loader_policy(raw)
     runtime_expected = identity["inputs"]["runtime_tree"]
     resource_expected = identity["inputs"]["resource_tree"]
     active = raw.get("active_runtime")
@@ -128,6 +211,7 @@ def normalize(args: argparse.Namespace) -> dict[str, Any]:
     assert_relative_json(normalized, label="normalized runtime provenance")
     result = {
         "schema": "kazstem-linux-runtime-provenance-v2",
+        "pass": True,
         "release": identity["release"],
         "source_commit": identity["source_commit"],
         "official": True,

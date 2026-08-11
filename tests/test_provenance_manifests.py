@@ -1025,7 +1025,14 @@ class PlatformRuntimeManifestTests(unittest.TestCase):
             PROJECT_ROOT / "packaging" / "linux" / "kazstem-minimal.spec"
         ).read_text(encoding="utf-8")
         self.assertNotIn("KAZSTEM_LINUX_RUNTIME_LOCK", linux_spec)
-        self.assertIn('collect_data_files("qazmorph")', linux_spec)
+        self.assertNotIn('collect_data_files("qazmorph")', linux_spec)
+        self.assertIn('os.environ["KAZSTEM_CANONICAL_WHEEL"]', linux_spec)
+        self.assertIn('os.environ["KAZSTEM_FROZEN_BOOTSTRAP"]', linux_spec)
+        self.assertIn('hiddenimports=["qazmorph.cli"]', linux_spec)
+        self.assertIn(
+            'entry[0] != "qazmorph" and not entry[0].startswith("qazmorph.")',
+            linux_spec,
+        )
         runtime_lock = json.loads(
             (
                 PROJECT_ROOT
@@ -1137,7 +1144,7 @@ class PlatformRuntimeManifestTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         for placeholder in (
             "@VERSION@",
-            "@BINARY_ARCHIVE@",
+            "@BINARY_TOP_LEVEL@",
             "@SOURCE_COMMIT@",
             "@WHEEL_SHA256@",
             "@SDIST_SHA256@",

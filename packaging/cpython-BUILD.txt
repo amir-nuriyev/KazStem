@@ -1,0 +1,74 @@
+KazStem canonical CPython build-input contract
+==============================================
+
+This file is a source companion, not a claim that an arbitrary host Python is
+reproducible or that the canonical-artifact builder rebuilt Python itself. A
+source-built provider must separately bind the compiler/toolchain and build
+receipt produced from this recipe. A distribution provider instead binds the
+interpreter executable, standard-library tree with declared exclusions, zlib
+module/libz bytes, package revision, declared binary/source package records,
+and the exact machine-readable evidence scope. This is not a complete ambient
+DSO closure or proof that the binary was rebuilt from those sources. An opaque
+host `/usr/bin/python3` without those byte-input records is ineligible.
+
+Required isolated inputs
+------------------------
+
+* the python.org source archive named by `interpreter_provenance.source_archive`;
+* an empty, fresh build root and install prefix;
+* the exact C compiler, linker, make, pkg-config, libc development files,
+  libffi, expat, and zlib records named by a separately audited source-build
+  identity (the canonical artifact identity does not make that claim);
+* `SOURCE_DATE_EPOCH` from the release identity; and
+* a network-disabled environment with empty HOME, TMPDIR, and cache roots.
+
+Reference invocation
+--------------------
+
+The release receipt records the resolved tool paths, versions, input hashes,
+environment, commands, exits, and installed-tree hash.  `<...>` values below
+are identity-bound logical paths, never ambient host paths.
+
+```
+tar --extract --file <Python-X.Y.Z.tgz> --directory <fresh-source-root>
+cd <fresh-build-root>
+env -i \
+  HOME=<fresh-home> TMPDIR=<fresh-tmp> \
+  LANG=C.UTF-8 LC_ALL=C.UTF-8 TZ=UTC \
+  SOURCE_DATE_EPOCH=<epoch> PYTHONHASHSEED=0 \
+  CONFIG_SITE=/dev/null \
+  <fresh-source-root>/Python-X.Y.Z/configure \
+    --prefix=<fresh-install-prefix> \
+    --with-ensurepip=no \
+    --with-pydebug=no \
+    --enable-shared
+env -i \
+  HOME=<fresh-home> TMPDIR=<fresh-tmp> \
+  LANG=C.UTF-8 LC_ALL=C.UTF-8 TZ=UTC \
+  SOURCE_DATE_EPOCH=<epoch> PYTHONHASHSEED=0 \
+  make -j1
+env -i \
+  HOME=<fresh-home> TMPDIR=<fresh-tmp> \
+  LANG=C.UTF-8 LC_ALL=C.UTF-8 TZ=UTC \
+  SOURCE_DATE_EPOCH=<epoch> PYTHONHASHSEED=0 \
+  make install
+```
+
+The install is rejected if `ensurepip`, pip, setuptools, user-site content,
+unchecked-hash bytecode, absolute build-root references, or an undeclared
+shared-library dependency is present.  KazStem bootstraps the identity-bound
+pip wheel from the offline wheelhouse with `-S`; ambient pip is never used.
+
+Verification
+------------
+
+Before either canonical artifact build, the release tooling rehashes the
+interpreter executable, standard-library tree, zlib extension, and loaded
+libz. The provider package records supply declared provenance inputs and
+matching source records; they are not a complete operating-system DSO closure
+and do not turn this artifact builder into a general CPython rebuilder. The
+source payload must contain this recipe,
+`cpython-LICENSE`, the upstream CPython archive, every provider binary/source
+package, and both offline wheelhouses with their license/source inventories.
+No separate OpenSSL/libcrypto runtime or source is required or admitted by
+this pure-artifact build contract.
