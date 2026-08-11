@@ -26,6 +26,22 @@ ROOT = Path(__file__).resolve().parents[1]
 WINDOWS = ROOT / "packaging/windows"
 sys.path.insert(0, str(WINDOWS))
 
+# The combined cross-platform suite imports Linux release modules first.  The
+# platform scripts intentionally use adjacent top-level helper names when run
+# as standalone entry points, so discard any same-named module whose source is
+# not the Windows implementation before importing this platform's helpers.
+# Previously materialize_git_source received Linux release_common, and the
+# support-file verifier likewise observed Linux assembler modules.
+for _adjacent_file in WINDOWS.glob("*.py"):
+    _adjacent_name = _adjacent_file.stem
+    _loaded = sys.modules.get(_adjacent_name)
+    _loaded_file = getattr(_loaded, "__file__", None)
+    if _loaded is not None and (
+        _loaded_file is None
+        or Path(_loaded_file).resolve() != _adjacent_file.resolve()
+    ):
+        sys.modules.pop(_adjacent_name, None)
+
 import release_common as common  # noqa: E402
 import assemble_ready_run  # noqa: E402
 import audit_ready_run_archive  # noqa: E402
