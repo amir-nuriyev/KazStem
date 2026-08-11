@@ -1,67 +1,141 @@
-# macOS arm64 ready-run recipe
+# macOS 15 arm64 public-release tooling
 
-This recipe builds the unsigned/not-notarized KazStem 0.2.3 CLI asset tested on
-macOS 15 arm64. It never changes or relabels the f03e resource bytes.
+This directory builds and audits KazStem's lean, ready-to-run macOS archive and
+its separately published corresponding-source archive. The target is thin
+arm64 on macOS 15 or newer. The ready-run is ad-hoc signed for local integrity,
+but has no Developer ID identity, TeamIdentifier, notarization, or stapled
+ticket. Nothing here pushes, tags, publishes, notarizes, or changes the f03e
+linguistic-resource bytes.
 
-This checked-in binding remains f03e-only. bf1f productive generation is
-pending a real macOS native build and the complete dependency, protocol, and
-practical acceptance gates; the Ubuntu result is not portable evidence.
+The checked-in Darwin release binding remains f03e-only. The bf1f productive
+resource candidate must not replace it until a real macOS native build passes
+the complete dependency, protocol, provenance, and practical acceptance
+matrix; Linux validation is not portable evidence for that swap.
 
-Build the checked-in source twice at `SOURCE_DATE_EPOCH=1786361661`, require
-byte-identical wheels and normalized sdists, then install the exact wheel into
-an isolated CPython 3.14.3 environment containing the SHA-locked PyInstaller
-6.22.0 and hooks-contrib 2026.6 wheels. Set `KAZSTEM_ENTRYPOINT` to that
-environment's `kazstem` entry point and run:
+Every final action consumes one generated
+`kazstem-macos-release-identity-v2` document. That document locks the exact
+version, tag URL, Git commit/tree/origin, epoch, canonical wheel and sdist,
+resource and Darwin runtime manifests, complete build/source closure, CPython
+and PyInstaller stack, archive policies, compression tools, and every evidence
+generator. A hand-written release claim is not a substitute for this file.
 
-```sh
-LC_ALL=C LANG=C PYTHONHASHSEED=0 SOURCE_DATE_EPOCH=1786361661 \
-  pyinstaller --clean --noconfirm \
-  --distpath pyinstaller-dist --workpath pyinstaller-work \
-  packaging/macos/kazstem-minimal.spec
-```
+## What the pipeline proves
 
-The spec removes networking/TLS, HTTP/email/URL, asyncio/multiprocessing,
-SQLite, UI, test/build, unused compression, ctypes, XML-parser, and generic
-archive stacks. `_hashlib` and `_ssl` are absent; `_sha2` remains and must be
-proven to implement `hashlib.sha256`. PyInstaller forcibly retains the `zlib`
-extension for its own compressed bootstrap archive: deleting it must fail the
-negative control with `Module object for pyimod01_archive is NULL`.
+The checked tooling requires all of the following before finalization:
 
-Copy only the sealed f03e resource directory and the runtime declared by the
-checked-in platform lock. For the reviewed Project.JJ runtime, remove the
-unused generic `hfst-lookup`; analysis uses `hfst-proc`, OOV and generation use
-`hfst-optimized-lookup`, and contextual mode uses `cg-proc`. Recursively retain
-only the dylibs reached by those three executables.
+- two distinct, non-aliased fresh roots rebuild the canonical Python pair,
+  create independent freezer environments, run PyInstaller, and assemble both
+  native archives; copied launchers or copied reproduction receipts fail;
+- a canonical wheel/sdist builder uses an exact offline, hash-locked wheelhouse,
+  canonicalizes ZIP/tar/gzip metadata, rebuilds an adversarially retimed
+  extracted sdist, and records the Python/zlib/tool identity used for byte
+  comparison;
+- the ready-run contains the f03e resources and only the selected Darwin
+  runtime. It contains no neural weights, source archives, OpenSSL, `_ssl`,
+  `_hashlib`, network/TLS/HTTP/email/URL stacks, installer, or updater; `_sha2`
+  must positively provide SHA-256 and removing PyInstaller's required `zlib`
+  must fail its negative control;
+- every Mach-O is thin arm64 with a macOS 15 deployment floor. All non-system
+  dependencies resolve inside the bundle; only `/usr/lib` and Apple frameworks
+  are external boundaries. Bundle-relative rpaths must precede inherited
+  absolute rpaths;
+- stripped candidates are retained only when smaller and behavior,
+  dependencies, deployment floor, and signature checks remain identical.
+  Inner transforms are followed by bottom-up ad-hoc re-signing and strict
+  verification of the complete `Python.framework` and every embedded
+  framework/bundle;
+- ready-run and corresponding-source compression are both measured from their
+  own canonical normalized **uncompressed tar**. gzip, xz, and zstd are built
+  twice, decompressed back to the exact tar/tree, and the smallest pre-declared
+  eligible candidate is selected. The report states a measured component
+  floor, never an unverifiable global minimum;
+- hostile outer and nested archives are rejected with raw/decompressed/header,
+  member, file, and aggregate caps. Traversal, absolute/Windows/device/ADS and
+  non-NFC names, case collisions, duplicate names, hardlinks, devices, FIFOs,
+  encryption, PAX xattrs/ACLs, AppleDouble, `__MACOSX`, unsafe symlink chains,
+  and undeclared magic-recognized archives all fail;
+- black-box and practical gates cover aliases/version, analysis/OOV,
+  dictionary/productive generation and round trips, CG, all five formats,
+  MyStem flags/envelopes/deduplication, stdin/files, CR/LF/CRLF, Unicode and
+  decomposed text, emoji, malformed UTF-8, NUL/XML failures, hostile paths and
+  cwd, read-only/offline use, wheel/module/API/frozen byte parity, randomized
+  lossless reconstruction, large output, repetition, cleanup, startup,
+  throughput, and peak RSS;
+- the macOS sandbox/process gate denies network operations for every checked
+  descendant and includes a denied socket negative control plus normalized,
+  non-truncated trace events. Module absence alone is never called network
+  isolation.
 
-For each copied Mach-O, compare the untouched upstream byte size with a copy
-processed by `/usr/bin/strip -S -x` and then
-`codesign --force --sign - --timestamp=none`. Retain a transformed copy only
-when it is strictly smaller and every behavior, dependency, minimum-OS, and
-strict-signature gate passes. In the reviewed native runtime this transforms
-only `libfst.27.dylib`; the other files retain their exact Project.JJ archive
-bytes and upstream ad-hoc/linker signatures. The transformed library has a new
-local ad-hoc signature and is fully rebound by the regenerated runtime
-manifest. Do not post-process the PyInstaller launcher: it contains an appended
-CArchive and its symbol audit has no removable local symbols. PyInstaller's
-copied Python Mach-O files are independently stripped and ad-hoc signed; re-sign
-the complete copied `Python.framework` after its binary is stripped. Set every
-native-runtime executable/symlink to its final read-only executable mode and
-every library to its final read-only data mode *before* regenerating the
-detached runtime manifest from the exact source lock. Keep only the runtime
-root temporarily owner-writable for the manifest's atomic replacement; then
-seal that directory too and require `--verify` to reproduce the manifest from
-the fully sealed tree. Rename it to its content-addressed bundle ID, update the
-public runtime lock, rebuild the wheel, and repeat the frozen build.
+## Release ordering
 
-Seal the resource/runtime directories read-only. Add only notices, licenses,
-the module/native inclusion ledger, and an exact name/size/SHA-256/URL binding
-to the same-release corresponding-source asset. The lean binary must not embed
-source or build-tool archives. Normalize archive ownership, modes, timestamps,
-and gzip headers; build twice; fresh-extract elsewhere; then run the complete
-black-box, provenance, module, Mach-O, path, source-binding, and no-neural gates.
+The source archive stores a stable projection containing the ready-run
+version, filename, and URL, but never its hash and never the source archive's
+own compression-dependent name or hash. The ready-run then stores the exact
+source filename, URL, byte count, and SHA-256. This is intentionally one-way.
 
-The 33 MiB ICU data library is deliberately retained. ICU resource selection
-is dynamic and the CLI accepts arbitrary Unicode input, so finite Kazakh/KTB
-fixtures cannot prove that a filtered data image preserves all advertised
-behavior. A filtered ICU candidate is acceptable only with a reproducible ICU
-build recipe and byte-semantic equality across the complete release gate.
+Because the ready filename is selected by measured compression while the
+ready payload binds the source archive, staging must evaluate the finite
+gzip/xz/zstd filename choices and require a unique measured fixed point. Once
+the canonical uncompressed tar records and winning formats are known,
+`prepare_release_identity.py` generates the final identity from checked inputs.
+Final assembly must reproduce those exact records from fresh roots; observation
+or quarantined candidates are never final artifacts.
+
+Run release gates only from the generated logical release workspace. Each
+identity-bound gate is invoked with the exact checked Python using `-S`, exact
+relative argv, fixed locale/hash seed/epoch/timezone, and a real timeout. Before
+working it verifies the live interpreter, executing script bytes, clean source
+commit/tree/origin, and environment. Evidence contains only logical or
+bundle-relative paths; HTTPS URLs and the documented Apple system boundaries
+are the only absolute references allowed.
+
+The principal tools are:
+
+- `prepare_release_identity.py`: derive and strictly round-trip the final
+  identity from exact files and generated observations;
+- `prepare_bf1f_validation.py`: verify the checked bf1f producer manifest and
+  f03-only Darwin lock, then emit an external candidate lock plus the exact
+  native acceptance matrix. Its receipt always records that bf1f is disabled;
+- `build_frozen_runtime.py`: create and minimize one fresh PyInstaller tree,
+  re-sign frameworks/bundles, and emit its full module/native ledger;
+- `assemble_corresponding_source.py` and `assemble_ready_run.py`: create the
+  canonical tar and identity-selected container without overwriting outputs;
+- `compare_compression.py`: measure gzip/xz/zstd twice for both canonical tars;
+- `audit_corresponding_source_archive.py` and
+  `audit_ready_run_archive.py`: hostile fresh-extraction and closure audits;
+- `verify_python_reproducibility.py`: coordinate independent canonical Python,
+  freezer, source, and ready-run builds with per-root receipts;
+- `audit_macho_closure.py`, `audit_module_native_inclusion.py`,
+  `blackbox_macos_bundle.py`, `practical_matrix_macos.py`, and
+  `verify_offline_processes.py`: native, minimization, behavior, performance,
+  and offline evidence;
+- `finalize_release.py`: recompute every identity, artifact, receipt, evidence,
+  archive, and co-publication binding and write the final ledger plus
+  `SHA256SUMS` only after every gate passes.
+
+The corresponding-source payload must include the exact Git archive; all
+Project.JJ/HFST/CG/foma/OpenFst/readline/ICU/ncurses/SQLite/zlib inputs;
+CPython, PyInstaller, hooks, and build-stack wheels plus preferred source,
+recipes, patches, licenses, and notices. OpenSSL source is deliberately absent
+because the binary and native-dependency audits must prove that no OpenSSL
+code is distributed.
+
+The 33 MiB ICU data library remains unless a separately reproducible ICU build
+and the complete release behavior matrix prove a smaller candidate equivalent.
+Finite Kazakh fixtures do not justify claiming arbitrary Unicode coverage for a
+filtered ICU image.
+
+## bf1f Darwin candidate
+
+`bf1f-validation-matrix.json` fixes the only proposed lock change and the
+native behavior, closure, provenance, offline, performance, reproduction, and
+source gates required before review. The preparation tool refuses to write
+inside the repository, requires the tracked Darwin entry to remain exactly
+f03-only, and emits a candidate whose sole semantic lock change replaces that
+one resource ID while retaining runtime `5341c48b…` byte-for-byte. The output
+is deliberately not a release input and cannot certify native validation.
+
+Only evidence from a real macOS 15 arm64 build may unblock the tracked swap.
+The candidate must rebuild the wheel and frozen runtime in independent roots,
+run every matrix case without skips, and reproduce all archive and evidence
+identities. Ubuntu bf1f results do not satisfy any Darwin gate.
