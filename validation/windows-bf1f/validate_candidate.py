@@ -209,7 +209,8 @@ def probe_hfst_proc(helper: Path, fst: Path, output: Path) -> None:
         raise ValidationError("hfst-proc pipe probe requires native Windows")
     selected_helper = helper.resolve(strict=True)
     selected_fst = fst.resolve(strict=True)
-    payload = "Сәлем\nоқу\nҚазақстан\n".encode("utf-8")
+    stream_payload = "Сәлем\nсәлем\nоқу\nҚазақстан\n".encode("utf-8")
+    atomic_payload = "Сәлем\0сәлем\0оқу\0Қазақстан\0".encode("utf-8")
     environment = {
         name: value
         for name, value in os.environ.items()
@@ -224,36 +225,70 @@ def probe_hfst_proc(helper: Path, fst: Path, output: Path) -> None:
     records: dict[str, Any] = {}
     with tempfile.TemporaryDirectory(prefix="kazstem-hfst-proc-probe-") as temporary:
         root = Path(temporary)
-        input_path = root / "input.utf8"
-        output_path = root / "output.utf8"
-        input_path.write_bytes(payload)
+        stream_input = root / "stream-input.utf8"
+        atomic_input = root / "atomic-input.utf8"
+        stream_output = root / "stream-output.utf8"
+        atomic_output = root / "atomic-output.utf8"
+        stream_input.write_bytes(stream_payload)
+        atomic_input.write_bytes(atomic_payload)
         cases = (
             (
-                "redirected-stdin-control",
+                "stream-redirected-stdin",
                 [str(selected_helper), "-w", str(selected_fst)],
-                payload,
-                None,
-            ),
-            (
-                "positional-input-stdout",
-                [str(selected_helper), "-w", str(selected_fst), str(input_path)],
+                stream_payload,
                 None,
                 None,
             ),
             (
-                "positional-input-output",
+                "stream-positional-input-stdout",
+                [str(selected_helper), "-w", str(selected_fst), str(stream_input)],
+                None,
+                None,
+                stream_input,
+            ),
+            (
+                "stream-positional-input-output",
                 [
                     str(selected_helper),
                     "-w",
                     str(selected_fst),
-                    str(input_path),
-                    str(output_path),
+                    str(stream_input),
+                    str(stream_output),
                 ],
                 None,
-                output_path,
+                stream_output,
+                stream_input,
+            ),
+            (
+                "atomic-redirected-stdin",
+                [str(selected_helper), "-w", "-z", str(selected_fst)],
+                atomic_payload,
+                None,
+                None,
+            ),
+            (
+                "atomic-positional-input-stdout",
+                [str(selected_helper), "-w", "-z", str(selected_fst), str(atomic_input)],
+                None,
+                None,
+                atomic_input,
+            ),
+            (
+                "atomic-positional-input-output",
+                [
+                    str(selected_helper),
+                    "-w",
+                    "-z",
+                    str(selected_fst),
+                    str(atomic_input),
+                    str(atomic_output),
+                ],
+                None,
+                atomic_output,
+                atomic_input,
             ),
         )
-        for name, command, stdin, declared_output in cases:
+        for name, command, stdin, declared_output, declared_input in cases:
             completed = subprocess.run(
                 command,
                 input=stdin,
@@ -274,6 +309,7 @@ def probe_hfst_proc(helper: Path, fst: Path, output: Path) -> None:
                 "argv": [
                     "hfst-proc.exe",
                     "-w",
+                    *(["-z"] if "atomic" in name else []),
                     "<BF1F-AUTOMORF>",
                     *(
                         ["<UTF8-INPUT>", "<UTF8-OUTPUT>"]
@@ -282,26 +318,34 @@ def probe_hfst_proc(helper: Path, fst: Path, output: Path) -> None:
                     ),
                 ],
                 "returncode": completed.returncode,
-                "stdin_sha256": sha256_bytes(payload) if stdin is not None else None,
-                "input_file": file_record(input_path) if stdin is None else None,
+                "stdin_sha256": sha256_bytes(stdin) if stdin is not None else None,
+                "input_file": file_record(declared_input) if declared_input is not None else None,
                 "stdout": stdout_bytes.decode("utf-8", "strict"),
                 "stdout_sha256": sha256_bytes(stdout_bytes),
                 "stderr": completed.stderr.decode("utf-8", "replace"),
                 "stderr_sha256": sha256_bytes(completed.stderr),
             }
-    control = records["redirected-stdin-control"]
-    input_only = records["positional-input-stdout"]
-    explicit = records["positional-input-output"]
+    stream_control = records["stream-redirected-stdin"]
+    stream_input_only = records["stream-positional-input-stdout"]
+    stream_explicit = records["stream-positional-input-output"]
+    atomic_control = records["atomic-redirected-stdin"]
+    atomic_input_only = records["atomic-positional-input-stdout"]
+    atomic_explicit = records["atomic-positional-input-output"]
+
+    def lf(value: str) -> str:
+        return value.replace("\r\n", "\n")
+
     passing = (
-        control["returncode"] == input_only["returncode"] == explicit["returncode"] == 0
-        and input_only["stdout"] == explicit["stdout"]
-        and control["stdout"] != explicit["stdout"]
-        and "сәлем" in explicit["stdout"].casefold()
-        and "оқу<n><attr>" in explicit["stdout"]
+        all(record["returncode"] == 0 for record in records.values())
+        and lf(stream_control["stdout"]) == lf(stream_input_only["stdout"]) == lf(stream_explicit["stdout"])
+        and lf(atomic_input_only["stdout"]) == lf(atomic_explicit["stdout"])
+        and lf(atomic_control["stdout"]) != lf(atomic_explicit["stdout"])
+        and "^сәлем/сәлем" in lf(stream_explicit["stdout"]).casefold()
+        and "оқу<n><attr>" in lf(atomic_explicit["stdout"])
     )
     result = "pass" if passing else "fail"
     conclusion = (
-        "Windows redirected stdin differs from documented positional files"
+        "Windows atomic redirected stdin differs from documented positional files"
         if passing
         else "positional-file hypothesis was not fully confirmed"
     )
