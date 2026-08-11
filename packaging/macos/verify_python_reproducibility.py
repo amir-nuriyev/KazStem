@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build every release artifact in fresh roots and rebuild from the sdist."""
+"""Consume canonical Python artifacts and rebuild fresh macOS-native roots."""
 
 from __future__ import annotations
 
@@ -17,22 +17,20 @@ from typing import Any
 
 from release_common import (
     ReleaseError,
-    archive_limits,
     assert_relative_json,
     begin_gate_execution,
     ensure_distinct_nonaliased_paths,
     ensure_output_outside,
-    extract_validated_tar,
     file_record,
     gate_envelope,
     identity_sha256,
-    inspect_tar,
     json_bytes,
     load_identity,
     locked_gate_invocation,
     verify_artifact,
     verify_file,
 )
+from canonical_python_authority import verify_bound_authority
 
 
 def _resolved_tool(name: str, expected: dict[str, Any]) -> Path:
@@ -163,19 +161,6 @@ def _run(
     return result
 
 
-def _command(
-    configured: list[str],
-    *,
-    tools: dict[str, Path],
-    actual_dist: Path,
-    logical_dist: str,
-) -> tuple[list[str], list[str]]:
-    actual = [item.replace("{dist}", str(actual_dist)) for item in configured]
-    logical = [item.replace("{dist}", logical_dist) for item in configured]
-    actual[0] = str(tools[configured[0]])
-    return actual, logical
-
-
 def _expanded(
     configured: list[str],
     *,
@@ -245,6 +230,7 @@ def _clone_exact(
     git: Path,
     environment: dict[str, str],
     logical_root: str,
+    source_tag_object: str,
 ) -> dict[str, Any]:
     if checkout.exists() or checkout.is_symlink():
         raise ReleaseError(f"fresh checkout already exists: {logical_root}")
@@ -318,6 +304,16 @@ def _clone_exact(
     ).stdout.strip()
     if observed_ref != identity["source_commit"]:
         raise ReleaseError("fresh checkout release tag differs from source_commit")
+    observed_tag_object = subprocess.run(
+        [str(git), "rev-parse", identity["source_ref"]],
+        cwd=checkout,
+        env=environment,
+        text=True,
+        stdout=subprocess.PIPE,
+        check=True,
+    ).stdout.strip()
+    if observed_tag_object != source_tag_object:
+        raise ReleaseError("fresh checkout release tag object differs from authority")
     status = subprocess.run(
         [str(git), "status", "--porcelain=v1", "--untracked-files=all"],
         cwd=checkout,
@@ -332,6 +328,7 @@ def _clone_exact(
         "source_tree": observed_tree,
         "source_origin": identity["source_origin"],
         "source_ref": identity["source_ref"],
+        "source_tag_object": source_tag_object,
         "commands": commands,
     }
 
@@ -372,6 +369,10 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
         "base_ledger",
         "freezer_requirements",
         "freezer_spec",
+        "python_build_identity",
+        "linux_release_identity",
+        "linux_reproducibility",
+        "python_interpreter_source",
     ):
         path = getattr(args, name)
         if path.is_symlink() or not path.is_file():
@@ -382,6 +383,16 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
     canonical_sdist = canonical / sdist["filename"]
     verify_artifact(canonical_wheel, wheel, label="canonical wheel")
     verify_artifact(canonical_sdist, sdist, label="canonical sdist")
+    authority = verify_bound_authority(
+        identity=identity,
+        repository=repository,
+        payload=args.payload,
+        python_build_identity_path=args.python_build_identity,
+        linux_release_identity_path=args.linux_release_identity,
+        linux_reproducibility_path=args.linux_reproducibility,
+        interpreter_source_path=args.python_interpreter_source,
+        canonical_artifacts=canonical,
+    )
     from release_common import verify_tree
 
     verify_tree(
@@ -446,6 +457,20 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
     )
     if seed_ref.returncode or seed_ref.stdout.strip() != identity["source_commit"]:
         raise ReleaseError("seed repository release tag differs from source_commit")
+    seed_tag_object = subprocess.run(
+        [str(git), "rev-parse", identity["source_ref"]],
+        cwd=repository,
+        env=environment,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    if (
+        seed_tag_object.returncode
+        or seed_tag_object.stdout.strip() != authority["source_tag_object"]
+    ):
+        raise ReleaseError("seed repository release tag object differs from authority")
     seed_origin = subprocess.run(
         [str(git), "remote", "get-url", "origin"],
         cwd=repository,
@@ -461,6 +486,17 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
         raise ReleaseError("seed repository origin differs from identity")
 
     all_inodes: set[tuple[int, int]] = set()
+    canonical_inputs: dict[str, dict[str, Any]] = {}
+    for name, path in (("wheel", canonical_wheel), ("sdist", canonical_sdist)):
+        metadata = path.stat()
+        if metadata.st_nlink != 1:
+            raise ReleaseError(f"canonical {name} is hard-linked")
+        all_inodes.add((metadata.st_dev, metadata.st_ino))
+        canonical_inputs[name] = {
+            "path": f"artifacts/{path.name}",
+            "file": file_record(path),
+            "linux_authoritative": True,
+        }
     builds: list[dict[str, Any]] = []
     native_roots: list[str] = []
     root_receipts: list[dict[str, Any]] = []
@@ -476,34 +512,12 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
             git=git,
             environment=environment,
             logical_root=f"{label}/checkout",
+            source_tag_object=authority["source_tag_object"],
         )
         checkout_files = _assert_unique_regular_files(checkout, all_inodes)
-        dist = build_root / "python-dist"
-        actual_argv, logical_argv = _command(
-            configuration["direct_build_argv"],
-            tools=tools,
-            actual_dist=dist,
-            logical_dist=f"{label}/python-dist",
-        )
-        if dist.exists() or dist.is_symlink():
-            raise ReleaseError("direct-build output existed before command execution")
+        built_wheel = canonical_wheel
+        built_sdist = canonical_sdist
         start_ns = time.time_ns()
-        build_command = _run(
-            actual_argv,
-            logical_argv=logical_argv,
-            cwd=checkout,
-            environment=environment,
-        )
-        built_wheel = dist / wheel["filename"]
-        built_sdist = dist / sdist["filename"]
-        verify_artifact(built_wheel, wheel, label=f"{label} wheel")
-        verify_artifact(built_sdist, sdist, label=f"{label} sdist")
-        wheel_freshness = _artifact_freshness(
-            built_wheel, start_ns=start_ns, inodes=all_inodes
-        )
-        sdist_freshness = _artifact_freshness(
-            built_sdist, start_ns=start_ns, inodes=all_inodes
-        )
 
         root_environment = {**environment, "HOME": str(build_root / "controlled-home")}
         (build_root / "controlled-home").mkdir()
@@ -538,7 +552,7 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
                 "{freezer_python}": f"{label}/freezer-env/bin/python",
                 "{freezer_requirements}": "inputs/freezer-requirements.lock",
                 "{freezer_wheelhouse}": "inputs/freezer-wheelhouse",
-                "{wheel}": f"{label}/python-dist/{wheel['filename']}",
+                "{wheel}": f"artifacts/{wheel['filename']}",
             },
         )
         install_command = _run(
@@ -571,7 +585,7 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
             logical_values={
                 "{freezer_python}": f"{label}/freezer-env/bin/python",
                 "{identity}": "release-identity.json",
-                "{wheel}": f"{label}/python-dist/{wheel['filename']}",
+                "{wheel}": f"artifacts/{wheel['filename']}",
                 "{spec}": "packaging/macos/kazstem-minimal.spec",
                 "{freezer_work}": f"{label}/freezer-work",
                 "{frozen_dist}": f"{label}/frozen",
@@ -663,9 +677,9 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
                 "--source-readme-template",
                 "packaging/macos/CORRESPONDING-SOURCE-README.template.md",
                 "--wheel",
-                f"{label}/python-dist/{wheel['filename']}",
+                f"artifacts/{wheel['filename']}",
                 "--sdist",
-                f"{label}/python-dist/{sdist['filename']}",
+                f"artifacts/{sdist['filename']}",
                 "--work-root",
                 f"{label}/native-work/source-work",
                 "--output",
@@ -738,9 +752,9 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
                 "--base-ledger",
                 f"{label}/frozen-build-evidence.json",
                 "--wheel",
-                f"{label}/python-dist/{wheel['filename']}",
+                f"artifacts/{wheel['filename']}",
                 "--sdist",
-                f"{label}/python-dist/{sdist['filename']}",
+                f"artifacts/{sdist['filename']}",
                 "--corresponding-source",
                 f"{label}/reproduction/{source_path.name}",
                 "--work-root",
@@ -845,6 +859,7 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
             "source_commit": identity["source_commit"],
             "source_tree": identity["source_tree"],
             "source_ref": identity["source_ref"],
+            "source_tag_object": authority["source_tag_object"],
             "fresh_frozen_tree": identity["inputs"]["frozen_tree"],
             "artifacts": {
                 "ready_run": identity["artifacts"]["ready_run"],
@@ -871,9 +886,7 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
                 "root": label,
                 "checkout": checkout_record,
                 "checkout_regular_files": checkout_files,
-                "build": build_command,
-                "wheel": wheel_freshness,
-                "sdist": sdist_freshness,
+                "canonical_python_inputs": canonical_inputs,
                 "frozen_build": {
                     "fresh_environment": True,
                     "environment_root": f"{label}/freezer-env",
@@ -886,46 +899,8 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
             }
         )
 
-    roundtrip_parent = workspace / "sdist-extract"
-    members = inspect_tar(
-        canonical_sdist,
-        limits=archive_limits(identity, "nested"),
-        expected_top=f"kazstem-{identity['release']}",
-    )
-    roundtrip_source = extract_validated_tar(
-        canonical_sdist,
-        roundtrip_parent,
-        members=members,
-        limits=archive_limits(identity, "nested"),
-    )
-    _assert_unique_regular_files(roundtrip_source, all_inodes)
-    roundtrip_dist = workspace / "sdist-roundtrip-dist"
-    actual_argv, logical_argv = _command(
-        configuration["sdist_build_argv"],
-        tools=tools,
-        actual_dist=roundtrip_dist,
-        logical_dist="sdist-roundtrip/dist",
-    )
-    start_ns = time.time_ns()
-    roundtrip_command = _run(
-        actual_argv,
-        logical_argv=logical_argv,
-        cwd=roundtrip_source,
-        environment=environment,
-    )
-    roundtrip_wheel = roundtrip_dist / wheel["filename"]
-    roundtrip_sdist = roundtrip_dist / sdist["filename"]
-    verify_artifact(roundtrip_wheel, wheel, label="sdist-to-wheel rebuild")
-    verify_artifact(roundtrip_sdist, sdist, label="sdist rebuild")
-    roundtrip_wheel_freshness = _artifact_freshness(
-        roundtrip_wheel, start_ns=start_ns, inodes=all_inodes
-    )
-    roundtrip_sdist_freshness = _artifact_freshness(
-        roundtrip_sdist, start_ns=start_ns, inodes=all_inodes
-    )
-
     result = {
-        "schema": "kazstem-python-artifact-reproducibility-v2",
+        "schema": "kazstem-macos-python-native-reproducibility-v1",
         "pass": True,
         "release": identity["release"],
         "source_commit": identity["source_commit"],
@@ -940,24 +915,18 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
             "GIT_CONFIG_GLOBAL": "disabled",
             "GIT_CONFIG_NOSYSTEM": "1",
         },
-        "wheel_direct_builds": len(builds),
-        "sdist_direct_builds": len(builds),
+        "canonical_python_authority": authority,
+        "canonical_python_builds": authority["linux_reproducibility"][
+            "validated_distinct_roots"
+        ],
         "native_direct_assemblies": len(builds),
         "fresh_frozen_builds": len(builds),
         "frozen_tree_identity": all(
             build["frozen_build"]["output_tree"] == identity["inputs"]["frozen_tree"]
             for build in builds
         ),
-        "sdist_to_wheel_identity": True,
-        "sdist_to_sdist_identity": True,
         "canonical_artifacts": {"wheel": wheel, "sdist": sdist},
         "builds": builds,
-        "roundtrip": {
-            "root": "sdist-roundtrip",
-            "build": roundtrip_command,
-            "wheel": roundtrip_wheel_freshness,
-            "sdist": roundtrip_sdist_freshness,
-        },
         "native_reproduction_roots": native_roots,
         "root_receipts": root_receipts,
         "filesystem_aliases": [],
@@ -975,14 +944,17 @@ def verify(args: argparse.Namespace) -> dict[str, Any]:
             execution=execution,
         ),
         coverage={
-            "descendant_processes": max(1, len(builds) * 8 + 2),
+            "descendant_processes": max(1, len(builds) * 7),
             "full_descendant_coverage": True,
             "network_trace": None,
             "observations": {
                 "fresh_frozen_builds": len(builds),
                 "fresh_native_assemblies": len(builds),
                 "root_receipts": len(root_receipts),
-                "python_artifact_builds": len(builds) * 2 + 2,
+                "linux_canonical_python_builds": authority[
+                    "linux_reproducibility"
+                ]["validated_distinct_roots"],
+                "mac_python_artifact_builds": 0,
             },
             "trace_complete": True,
             "trace_truncated": False,
@@ -999,6 +971,10 @@ def main() -> int:
     parser.add_argument("--identity", required=True, type=Path)
     parser.add_argument("--repository", required=True, type=Path)
     parser.add_argument("--canonical-artifacts", required=True, type=Path)
+    parser.add_argument("--python-build-identity", required=True, type=Path)
+    parser.add_argument("--linux-release-identity", required=True, type=Path)
+    parser.add_argument("--linux-reproducibility", required=True, type=Path)
+    parser.add_argument("--python-interpreter-source", required=True, type=Path)
     parser.add_argument("--payload", required=True, type=Path)
     parser.add_argument("--resources", required=True, type=Path)
     parser.add_argument("--runtime", required=True, type=Path)

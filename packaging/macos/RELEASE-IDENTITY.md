@@ -17,8 +17,8 @@ macOS 15 thin arm64.
   filename, byte count, SHA-256, and same-release GitHub download URL.
 - `inputs` binds the frozen/resource/runtime/source-payload trees; manifests and
   runtime IDs; canonical Git archive; templates; unified/runtime-source locks;
-  documents; complete canonical/freezer build stack; offline wheelhouse and
-  requirements; freezer spec; and the exact CPython executables.
+  documents; complete canonical/freezer source closure; offline freezer
+  wheelhouse and requirements; freezer spec; and the exact Mac freezer CPython.
 - `ready_run` defines the stable root, launcher and aliases, platform lock,
   bundle destinations, permitted removals, required paths, and banned names.
 - `corresponding_source` defines distinct application/resource/runtime/freezer/
@@ -36,10 +36,13 @@ macOS 15 thin arm64.
 - `minimization` binds required and banned modules/native fragments, negative
   controls, measured compression candidates, strip acceptance, and the honest
   `measured-candidates-component-floor` claim scope.
-- `verification` binds fresh-root count; canonical/freezer commands,
-  environment, and tool executables; sandbox policy; and the exact evidence
-  gate set. Every generator includes the checked script record, full logical
-  argv, logical cwd, commit/tree, environment, tool, subjects, and timeout.
+- `verification` binds the immutable Linux canonical-Python authority (checked
+  shared builder/supervisor/Linux validator, exact Linux identity and v2
+  evidence hashes, tag object, interpreter source and source companions), the
+  two Mac freezer/native roots, freezer commands, environment/tool executables,
+  sandbox policy, and exact evidence gate set. Every generator includes the
+  checked script record, full logical argv/cwd, commit/tree, environment, tool,
+  subjects, and timeout.
 
 Tree identities are canonical SHA-256 hashes over sorted relative paths, entry
 kinds, modes, regular-file bytes/hashes, and symlink targets. `tree_record()` and
@@ -63,13 +66,16 @@ SHA-256. Therefore:
    ready filename; ambiguity or instability fails;
 4. the final identity is generated with both raw tar records and both selected
    compressed artifact records;
-5. two genuinely independent roots reproduce the canonical Python pair,
-   freezer tree, canonical tars, and compressed assets byte-for-byte.
+5. Linux proves the canonical Python pair in at least three fresh roots; two
+   genuinely independent Mac roots consume that pair and reproduce the freezer
+   tree, canonical tars, and compressed native assets byte-for-byte.
 
 Canonical Python ZIP byte identity is scoped to the exact identity-bound
 Python and zlib implementation. A platform receipt with different zlib may be
 used only for normalized content/metadata parity, never as evidence of ZIP byte
-identity. macOS final builds require the exact bound environment.
+identity. macOS does not claim compressed wheel byte reproduction under a
+different interpreter/zlib identity; it verifies and consumes the exact
+Linux-authoritative bytes.
 
 ## Archive and evidence rules
 

@@ -191,6 +191,15 @@ class ReleaseFixture:
         spec = MACOS_TOOLS / "kazstem-minimal.spec"
         destination_spec = self.repository / "packaging/macos/kazstem-minimal.spec"
         shutil.copyfile(spec, destination_spec)
+        for relative in (
+            "packaging/build_canonical_python_artifacts.py",
+            "packaging/process_supervisor.py",
+            "packaging/linux/release_common.py",
+            "packaging/linux/verify_python_reproducibility.py",
+        ):
+            destination = self.repository / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(PROJECT_ROOT / relative, destination)
         (self.repository / "module.py").write_text("VALUE = 1\n", encoding="utf-8")
         subprocess.run(["git", "add", "."], cwd=self.repository, check=True)
         git_environment = {
@@ -219,6 +228,7 @@ class ReleaseFixture:
         self.commit = self._git("rev-parse", "HEAD")
         self.tree = self._git("rev-parse", "HEAD^{tree}")
         self.source_ref = f"refs/tags/v{self.release}"
+        self.source_tag_object = self._git("rev-parse", self.source_ref)
         self.git_version = self._git("--version")
         self.git_archive = self.root / "canonical-git-archive.tar"
         self.git_archive.write_bytes(
@@ -351,6 +361,60 @@ class ReleaseFixture:
             info.mode = 0o644
             info.size = len(data)
             archive.addfile(info, io.BytesIO(data))
+        self.python_build_identity = self.root / "PYTHON-BUILD-IDENTITY.json"
+        write_json(
+            self.python_build_identity,
+            {"schema": "kazstem-canonical-python-build-identity-v2"},
+        )
+        self.linux_release_identity = self.root / "LINUX-RELEASE-IDENTITY.json"
+        write_json(
+            self.linux_release_identity,
+            {"schema": "kazstem-linux-release-identity-v2"},
+        )
+        self.linux_reproducibility = self.root / "linux-python-reproducibility.json"
+        write_json(
+            self.linux_reproducibility,
+            {"schema": "kazstem-python-artifact-reproducibility-v2"},
+        )
+        self.python_interpreter_source = self.root / "Python-3.12.3.tgz"
+        self.python_interpreter_source.write_bytes(b"fixture CPython source\n")
+        authority_sources = (
+            (
+                self.python_build_identity,
+                "build-inputs/PYTHON-BUILD-IDENTITY.json",
+                "canonical-python-identity",
+            ),
+            (
+                self.python_interpreter_source,
+                "build-inputs/Python-3.12.3.tgz",
+                "cpython-source",
+            ),
+            (
+                self.linux_release_identity,
+                "evidence/linux/RELEASE-IDENTITY.json",
+                "linux-release-identity",
+            ),
+            (
+                self.linux_reproducibility,
+                "evidence/linux/python-reproducibility.json",
+                "linux-reproducibility-evidence",
+            ),
+        )
+        self.authority_source_companions = []
+        for source, relative, role in authority_sources:
+            destination = self.payload / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, destination)
+            self.authority_source_companions.append(
+                {
+                    "path": relative,
+                    "role": role,
+                    "subject": "fixture-authority",
+                    "source_member": None,
+                    "file": common.file_record(destination),
+                }
+            )
+        self.authority_source_companions.sort(key=lambda item: item["path"])
 
     def _tool(
         self, name: str, path: Path, version_argv: list[str]
@@ -382,6 +446,77 @@ class ReleaseFixture:
             "filename": self.source_name,
             **zero_native,
             "url": self._url(self.source_name),
+        }
+        authority = {
+            "schema": "kazstem-macos-canonical-python-authority-v1",
+            "adapter": {
+                "path": "packaging/macos/canonical_python_authority.py",
+                "file": common.file_record(
+                    self.repository / "packaging/macos/canonical_python_authority.py"
+                ),
+                "schema": "kazstem-macos-canonical-python-authority-v1",
+            },
+            "builder": {
+                "path": "packaging/build_canonical_python_artifacts.py",
+                "file": common.file_record(
+                    self.repository / "packaging/build_canonical_python_artifacts.py"
+                ),
+                "identity_schema": "kazstem-canonical-python-build-identity-v2",
+                "receipt_schema": "kazstem-canonical-python-build-receipt-v2",
+            },
+            "process_supervisor": {
+                "path": "packaging/process_supervisor.py",
+                "file": common.file_record(
+                    self.repository / "packaging/process_supervisor.py"
+                ),
+            },
+            "linux_release_common": {
+                "path": "packaging/linux/release_common.py",
+                "file": common.file_record(
+                    self.repository / "packaging/linux/release_common.py"
+                ),
+                "identity_schema": "kazstem-linux-release-identity-v2",
+            },
+            "linux_validator": {
+                "path": "packaging/linux/verify_python_reproducibility.py",
+                "file": common.file_record(
+                    self.repository
+                    / "packaging/linux/verify_python_reproducibility.py"
+                ),
+                "payload_schema": "kazstem-python-artifact-reproducibility-v2",
+                "entrypoint": "validate_reproducibility_payload",
+            },
+            "python_build_identity": {
+                "path": "inputs/PYTHON-BUILD-IDENTITY.json",
+                "schema": "kazstem-canonical-python-build-identity-v2",
+                "file": common.file_record(self.python_build_identity),
+            },
+            "linux_release_identity": {
+                "path": "inputs/LINUX-RELEASE-IDENTITY.json",
+                "schema": "kazstem-linux-release-identity-v2",
+                "identity_contract_sha256": hashlib.sha256(
+                    self.linux_release_identity.read_bytes()
+                ).hexdigest(),
+                "file": common.file_record(self.linux_release_identity),
+            },
+            "linux_reproducibility": {
+                "path": "inputs/linux-python-reproducibility.json",
+                "schema": "kazstem-python-artifact-reproducibility-v2",
+                "minimum_distinct_roots": 3,
+                "validated_distinct_roots": 3,
+                "file": common.file_record(self.linux_reproducibility),
+            },
+            "interpreter_source": {
+                "path": "inputs/interpreter-source/Python-3.12.3.tgz",
+                "corresponding_source_path": "build-inputs/Python-3.12.3.tgz",
+                "file": common.file_record(self.python_interpreter_source),
+            },
+            "source_tag_object": self.source_tag_object,
+            "canonical_artifacts": {
+                "wheel": wheel_artifact,
+                "sdist": sdist_artifact,
+            },
+            "source_companions": self.authority_source_companions,
         }
 
         frozen_tree = common.tree_record(self.frozen)
@@ -617,7 +752,12 @@ class ReleaseFixture:
         required_source = sorted(
             set(source_categories.values())
             | set(marker_paths.values())
-            | {f"{app}/GIT-SOURCE.json", f"{app}/tree", "python-artifacts"}
+            | {
+                f"{app}/GIT-SOURCE.json",
+                f"{app}/tree",
+                "python-artifacts",
+                *[item["path"] for item in self.authority_source_companions],
+            }
         )
         required_ready = sorted(
             {
@@ -705,11 +845,6 @@ class ReleaseFixture:
                     },
                 },
                 "python_runtimes": {
-                    "canonical": {
-                        "implementation": "CPython",
-                        "version": "3.12.3",
-                        "executable": common.file_record(python_path),
-                    },
                     "freezer": {
                         "implementation": "CPython",
                         "version": "3.14.3",
@@ -803,20 +938,7 @@ class ReleaseFixture:
                 "minimum_distinct_roots": 2,
                 "reproducibility": {
                     "build_roots": 2,
-                    "direct_build_argv": [
-                        "python3.14",
-                        "-m",
-                        "build",
-                        "--outdir",
-                        "{dist}",
-                    ],
-                    "sdist_build_argv": [
-                        "python3.14",
-                        "-m",
-                        "build",
-                        "--outdir",
-                        "{dist}",
-                    ],
+                    "canonical_python_authority": authority,
                     "freezer_install_argv": [
                         "{freezer_python}",
                         "-m",
@@ -967,6 +1089,9 @@ class ReleaseFixture:
                 "source_commit": identity["source_commit"],
                 "source_tree": identity["source_tree"],
                 "source_ref": identity["source_ref"],
+                "source_tag_object": identity["verification"]["reproducibility"][
+                    "canonical_python_authority"
+                ]["source_tag_object"],
                 "fresh_frozen_tree": identity["inputs"]["frozen_tree"],
                 "artifacts": {
                     "ready_run": identity["artifacts"]["ready_run"],
@@ -1025,6 +1150,17 @@ class ReleaseFixture:
             builds.append(
                 {
                     "root": logical,
+                    "canonical_python_inputs": {
+                        name: {
+                            "path": f"artifacts/{identity['artifacts'][name]['filename']}",
+                            "file": {
+                                "bytes": identity["artifacts"][name]["bytes"],
+                                "sha256": identity["artifacts"][name]["sha256"],
+                            },
+                            "linux_authoritative": True,
+                        }
+                        for name in ("wheel", "sdist")
+                    },
                     "frozen_build": {
                         "output_tree": identity["inputs"]["frozen_tree"],
                         "fresh_environment": True,
@@ -1193,13 +1329,17 @@ class ReleaseFixture:
                 "lingering_native_processes": [],
             },
             "python-reproducibility": {
-                "schema": "kazstem-python-artifact-reproducibility-v2",
+                "schema": "kazstem-macos-python-native-reproducibility-v1",
                 "pass": True,
                 "release": identity["release"],
                 "source_commit": identity["source_commit"],
-                "wheel_direct_builds": 2,
-                "sdist_direct_builds": 2,
-                "sdist_to_wheel_identity": True,
+                "canonical_python_authority": identity["verification"][
+                    "reproducibility"
+                ]["canonical_python_authority"],
+                "canonical_python_builds": 3,
+                "canonical_artifacts": {
+                    name: identity["artifacts"][name] for name in ("wheel", "sdist")
+                },
                 "native_direct_assemblies": 2,
                 "fresh_frozen_builds": 2,
                 "frozen_tree_identity": True,
@@ -1283,6 +1423,18 @@ class ReleaseFixture:
 
 
 class MacOSReleaseToolingTests(unittest.TestCase):
+    def test_canonical_python_authority_contract_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            fixture = ReleaseFixture(Path(temporary))
+            hostile = copy.deepcopy(fixture.identity)
+            hostile["verification"]["reproducibility"][
+                "canonical_python_authority"
+            ]["linux_reproducibility"]["validated_distinct_roots"] = 2
+            hostile_path = fixture.root / "hostile-authority-identity.json"
+            write_json(hostile_path, hostile)
+            with self.assertRaisesRegex(common.ReleaseError, "Linux root proof"):
+                common.load_identity(hostile_path)
+
     def test_staging_rejects_ambiguous_compression_name_fixed_points(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             fixture = ReleaseFixture(Path(temporary))

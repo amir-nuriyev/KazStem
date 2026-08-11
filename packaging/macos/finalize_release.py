@@ -40,7 +40,7 @@ EVIDENCE_SCHEMAS = {
     "module-native-inclusion": "kazstem-macos-module-native-inclusion-v1",
     "optimization-ledger": "kazstem-macos-final-optimization-decision-ledger-v1",
     "practical": "kazstem-macos-practical-matrix-v1",
-    "python-reproducibility": "kazstem-python-artifact-reproducibility-v2",
+    "python-reproducibility": "kazstem-macos-python-native-reproducibility-v1",
     "ready-archive-audit": READY_AUDIT_SCHEMA,
     "runtime-provenance": "kazstem-macos-runtime-provenance-v2",
     "source-archive-audit": SOURCE_AUDIT_SCHEMA,
@@ -227,13 +227,17 @@ def _gate_evidence(
                 "runtime provenance loader summary is not independently reproduced"
             )
     if gate == "python-reproducibility" and (
-        not isinstance(value.get("wheel_direct_builds"), int)
-        or isinstance(value.get("wheel_direct_builds"), bool)
-        or value["wheel_direct_builds"] < 2
-        or not isinstance(value.get("sdist_direct_builds"), int)
-        or isinstance(value.get("sdist_direct_builds"), bool)
-        or value["sdist_direct_builds"] < 2
-        or value.get("sdist_to_wheel_identity") is not True
+        value.get("canonical_python_authority")
+        != identity["verification"]["reproducibility"][
+            "canonical_python_authority"
+        ]
+        or value.get("canonical_python_builds")
+        != identity["verification"]["reproducibility"][
+            "canonical_python_authority"
+        ]["linux_reproducibility"]["validated_distinct_roots"]
+        or value.get("canonical_python_builds", 0) < 3
+        or value.get("canonical_artifacts")
+        != {name: identity["artifacts"][name] for name in ("wheel", "sdist")}
         or value.get("native_direct_assemblies", 0) < 2
         or value.get("fresh_frozen_builds", 0) < 2
         or value.get("frozen_tree_identity") is not True
@@ -251,8 +255,21 @@ def _gate_evidence(
         for build in builds:
             frozen = build.get("frozen_build")
             native = build.get("native_assembly")
+            canonical_inputs = build.get("canonical_python_inputs")
+            expected_inputs = {
+                name: {
+                    "path": f"artifacts/{identity['artifacts'][name]['filename']}",
+                    "file": {
+                        "bytes": identity["artifacts"][name]["bytes"],
+                        "sha256": identity["artifacts"][name]["sha256"],
+                    },
+                    "linux_authoritative": True,
+                }
+                for name in ("wheel", "sdist")
+            }
             if (
-                not isinstance(frozen, dict)
+                canonical_inputs != expected_inputs
+                or not isinstance(frozen, dict)
                 or frozen.get("output_tree") != expected_tree
                 or frozen.get("fresh_environment") is not True
                 or not isinstance(frozen.get("commands"), list)
@@ -655,6 +672,7 @@ def finalize(args: argparse.Namespace) -> dict[str, Any]:
             "source_commit",
             "source_tree",
             "source_ref",
+            "source_tag_object",
             "fresh_frozen_tree",
             "artifacts",
             "commands",
@@ -665,6 +683,10 @@ def finalize(args: argparse.Namespace) -> dict[str, Any]:
             or root_report["source_commit"] != identity["source_commit"]
             or root_report["source_tree"] != identity["source_tree"]
             or root_report["source_ref"] != identity["source_ref"]
+            or root_report["source_tag_object"]
+            != identity["verification"]["reproducibility"][
+                "canonical_python_authority"
+            ]["source_tag_object"]
             or root_report["fresh_frozen_tree"] != identity["inputs"]["frozen_tree"]
             or root_report["artifacts"]
             != {
@@ -729,6 +751,9 @@ def finalize(args: argparse.Namespace) -> dict[str, Any]:
         "release": identity["release"],
         "source_commit": identity["source_commit"],
         "source_ref": identity["source_ref"],
+        "canonical_python_authority": identity["verification"][
+            "reproducibility"
+        ]["canonical_python_authority"],
         "release_url": identity["release_url"],
         "identity_contract_sha256": identity_digest,
         "identity": identity,

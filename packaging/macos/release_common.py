@@ -833,24 +833,16 @@ def load_identity(path: Path) -> dict[str, Any]:
                 f"inputs.build_stack.{role} is unsorted, duplicated, or incomplete"
             )
     python_runtimes = _exact_fields(
-        inputs["python_runtimes"], {"canonical", "freezer"}, "inputs.python_runtimes"
+        inputs["python_runtimes"], {"freezer"}, "inputs.python_runtimes"
     )
-    for role, expected_version in (("canonical", "3.12.3"), ("freezer", "3.14.3")):
-        runtime = _exact_fields(
-            python_runtimes[role],
-            {"implementation", "version", "executable"},
-            f"inputs.python_runtimes.{role}",
-        )
-        if (
-            runtime["implementation"] != "CPython"
-            or runtime["version"] != expected_version
-        ):
-            raise ReleaseError(
-                f"inputs.python_runtimes.{role} is not the sealed CPython"
-            )
-        _file_identity(
-            runtime["executable"], f"inputs.python_runtimes.{role}.executable"
-        )
+    runtime = _exact_fields(
+        python_runtimes["freezer"],
+        {"implementation", "version", "executable"},
+        "inputs.python_runtimes.freezer",
+    )
+    if runtime["implementation"] != "CPython" or runtime["version"] != "3.14.3":
+        raise ReleaseError("inputs.python_runtimes.freezer is not sealed CPython 3.14.3")
+    _file_identity(runtime["executable"], "inputs.python_runtimes.freezer.executable")
     documents = inputs["documents"]
     if not isinstance(documents, list) or not documents:
         raise ReleaseError("inputs.documents must be a non-empty list")
@@ -1185,8 +1177,7 @@ def load_identity(path: Path) -> dict[str, Any]:
         verification["reproducibility"],
         {
             "build_roots",
-            "direct_build_argv",
-            "sdist_build_argv",
+            "canonical_python_authority",
             "freezer_install_argv",
             "frozen_build_argv",
             "environment",
@@ -1203,6 +1194,195 @@ def load_identity(path: Path) -> dict[str, Any]:
         < 2
     ):
         raise ReleaseError("reproducibility requires at least two distinct roots")
+    authority = _exact_fields(
+        reproducibility["canonical_python_authority"],
+        {
+            "schema",
+            "adapter",
+            "builder",
+            "process_supervisor",
+            "linux_release_common",
+            "linux_validator",
+            "python_build_identity",
+            "linux_release_identity",
+            "linux_reproducibility",
+            "interpreter_source",
+            "source_tag_object",
+            "canonical_artifacts",
+            "source_companions",
+        },
+        "verification.reproducibility.canonical_python_authority",
+    )
+    if authority["schema"] != "kazstem-macos-canonical-python-authority-v1":
+        raise ReleaseError("canonical Python authority schema differs")
+    adapter = _exact_fields(
+        authority["adapter"],
+        {"path", "file", "schema"},
+        "canonical authority adapter",
+    )
+    if (
+        adapter["path"] != "packaging/macos/canonical_python_authority.py"
+        or adapter["schema"] != authority["schema"]
+    ):
+        raise ReleaseError("canonical Python authority adapter contract differs")
+    _file_identity(adapter["file"], "canonical authority adapter.file")
+    checked_sources = {
+        "process_supervisor": "packaging/process_supervisor.py",
+    }
+    for name, expected_path in checked_sources.items():
+        record = _exact_fields(
+            authority[name], {"path", "file"}, f"canonical authority {name}"
+        )
+        if record["path"] != expected_path:
+            raise ReleaseError(f"canonical authority {name} path differs")
+        _file_identity(record["file"], f"canonical authority {name}.file")
+    builder = _exact_fields(
+        authority["builder"],
+        {"path", "file", "identity_schema", "receipt_schema"},
+        "canonical authority builder",
+    )
+    if (
+        builder["path"] != "packaging/build_canonical_python_artifacts.py"
+        or builder["identity_schema"]
+        != "kazstem-canonical-python-build-identity-v2"
+        or builder["receipt_schema"]
+        != "kazstem-canonical-python-build-receipt-v2"
+    ):
+        raise ReleaseError("canonical authority builder contract differs")
+    _file_identity(builder["file"], "canonical authority builder.file")
+    linux_common = _exact_fields(
+        authority["linux_release_common"],
+        {"path", "file", "identity_schema"},
+        "canonical authority Linux release common",
+    )
+    if (
+        linux_common["path"] != "packaging/linux/release_common.py"
+        or linux_common["identity_schema"] != "kazstem-linux-release-identity-v2"
+    ):
+        raise ReleaseError("canonical authority Linux identity contract differs")
+    _file_identity(linux_common["file"], "canonical authority Linux common.file")
+    linux_validator = _exact_fields(
+        authority["linux_validator"],
+        {"path", "file", "payload_schema", "entrypoint"},
+        "canonical authority Linux validator",
+    )
+    if (
+        linux_validator["path"]
+        != "packaging/linux/verify_python_reproducibility.py"
+        or linux_validator["payload_schema"]
+        != "kazstem-python-artifact-reproducibility-v2"
+        or linux_validator["entrypoint"] != "validate_reproducibility_payload"
+    ):
+        raise ReleaseError("canonical authority Linux validator contract differs")
+    _file_identity(linux_validator["file"], "canonical authority Linux validator.file")
+    python_identity = _exact_fields(
+        authority["python_build_identity"],
+        {"path", "schema", "file"},
+        "canonical authority Python identity",
+    )
+    if (
+        python_identity["path"] != "inputs/PYTHON-BUILD-IDENTITY.json"
+        or python_identity["schema"]
+        != "kazstem-canonical-python-build-identity-v2"
+    ):
+        raise ReleaseError("canonical authority Python identity contract differs")
+    _file_identity(python_identity["file"], "canonical authority Python identity.file")
+    linux_identity = _exact_fields(
+        authority["linux_release_identity"],
+        {"path", "schema", "identity_contract_sha256", "file"},
+        "canonical authority Linux identity",
+    )
+    if (
+        linux_identity["path"] != "inputs/LINUX-RELEASE-IDENTITY.json"
+        or linux_identity["schema"] != "kazstem-linux-release-identity-v2"
+    ):
+        raise ReleaseError("canonical authority Linux identity input differs")
+    _sha(
+        linux_identity["identity_contract_sha256"],
+        "canonical authority Linux identity digest",
+    )
+    _file_identity(linux_identity["file"], "canonical authority Linux identity.file")
+    linux_repro = _exact_fields(
+        authority["linux_reproducibility"],
+        {
+            "path",
+            "schema",
+            "minimum_distinct_roots",
+            "validated_distinct_roots",
+            "file",
+        },
+        "canonical authority Linux reproducibility",
+    )
+    if (
+        linux_repro["path"] != "inputs/linux-python-reproducibility.json"
+        or linux_repro["schema"] != "kazstem-python-artifact-reproducibility-v2"
+        or linux_repro["minimum_distinct_roots"] != 3
+        or isinstance(linux_repro["validated_distinct_roots"], bool)
+        or not isinstance(linux_repro["validated_distinct_roots"], int)
+        or linux_repro["validated_distinct_roots"] < 3
+    ):
+        raise ReleaseError("canonical authority Linux root proof differs")
+    _file_identity(linux_repro["file"], "canonical authority Linux reproducibility.file")
+    if (
+        not isinstance(authority["source_tag_object"], str)
+        or COMMIT.fullmatch(authority["source_tag_object"]) is None
+    ):
+        raise ReleaseError("canonical authority release tag object is invalid")
+    if authority["canonical_artifacts"] != {
+        name: artifacts[name] for name in ("wheel", "sdist")
+    }:
+        raise ReleaseError("canonical authority artifact projection differs")
+    interpreter = _exact_fields(
+        authority["interpreter_source"],
+        {"path", "corresponding_source_path", "file"},
+        "canonical authority interpreter source",
+    )
+    if not interpreter["path"].startswith("inputs/interpreter-source/"):
+        raise ReleaseError("canonical authority interpreter logical path differs")
+    portable_path(interpreter["path"], label="canonical authority interpreter path")
+    portable_path(
+        interpreter["corresponding_source_path"],
+        label="canonical authority interpreter corresponding-source path",
+    )
+    _file_identity(interpreter["file"], "canonical authority interpreter source.file")
+    companions = authority["source_companions"]
+    if not isinstance(companions, list) or not companions:
+        raise ReleaseError("canonical authority source companion inventory is empty")
+    companion_paths: list[str] = []
+    for index, value in enumerate(companions):
+        companion = _exact_fields(
+            value,
+            {"file", "path", "role", "source_member", "subject"},
+            f"canonical authority source companion {index}",
+        )
+        companion_paths.append(
+            portable_path(
+                companion["path"],
+                label=f"canonical authority source companion {index}.path",
+            )
+        )
+        if (
+            not isinstance(companion["role"], str)
+            or SAFE_LABEL.fullmatch(companion["role"]) is None
+            or not isinstance(companion["subject"], str)
+            or not companion["subject"]
+        ):
+            raise ReleaseError("canonical authority source companion metadata differs")
+        if companion["source_member"] is not None:
+            portable_path(
+                companion["source_member"],
+                label=f"canonical authority source companion {index}.source_member",
+            )
+        _file_identity(companion["file"], f"canonical authority source companion {index}.file")
+    if companion_paths != sorted(set(companion_paths)) or not set(companion_paths) <= set(
+        source["required_paths"]
+    ):
+        raise ReleaseError("canonical authority source companions are not closed")
+    companion_by_path = {item["path"]: item for item in companions}
+    if companion_by_path.get(interpreter["corresponding_source_path"], {}).get(
+        "file"
+    ) != interpreter["file"]:
+        raise ReleaseError("canonical interpreter source companion differs")
     environment = _exact_fields(
         reproducibility["environment"],
         {"LANG", "LC_ALL", "PYTHONHASHSEED", "SOURCE_DATE_EPOCH", "TZ"},
@@ -1266,8 +1446,6 @@ def load_identity(path: Path) -> dict[str, Any]:
                     f"compression.{asset_name}.{format_name} tool is not reproducibility-bound"
                 )
     build_placeholders = {
-        "direct_build_argv": {"{dist}"},
-        "sdist_build_argv": {"{dist}"},
         "freezer_install_argv": {
             "{freezer_python}",
             "{freezer_requirements}",
@@ -1295,10 +1473,6 @@ def load_identity(path: Path) -> dict[str, Any]:
                 or len(item) > 4096
                 or absolute_reference(item) is not None
                 for item in argv
-            )
-            or (
-                command_name in {"direct_build_argv", "sdist_build_argv"}
-                and argv[0] not in tool_names
             )
             or {token for item in argv for token in re.findall(r"\{[a-z_]+\}", item)}
             != required_placeholders

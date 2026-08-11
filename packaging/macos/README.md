@@ -23,13 +23,15 @@ generator. A hand-written release claim is not a substitute for this file.
 
 The checked tooling requires all of the following before finalization:
 
-- two distinct, non-aliased fresh roots rebuild the canonical Python pair,
-  create independent freezer environments, run PyInstaller, and assemble both
-  native archives; copied launchers or copied reproduction receipts fail;
-- a canonical wheel/sdist builder uses an exact offline, hash-locked wheelhouse,
-  canonicalizes ZIP/tar/gzip metadata, rebuilds an adversarially retimed
-  extracted sdist, and records the Python/zlib/tool identity used for byte
-  comparison;
+- Linux owns the canonical wheel/sdist build: its checked shared builder uses
+  an exact offline, hash-locked wheelhouse, canonicalizes ZIP/tar/gzip metadata,
+  rebuilds an adversarially retimed extracted sdist, and proves the exact pair
+  in at least three fresh roots. macOS hash-binds that validated v2 authority
+  and consumes its artifact bytes without claiming a cross-zlib rebuild;
+- two distinct, non-aliased Mac roots each create an independent freezer
+  environment from those exact canonical bytes, run PyInstaller, and assemble
+  both native archives with independent raw-tar receipts; copied launchers,
+  artifacts, or reproduction receipts fail;
 - the ready-run contains the f03e resources and only the selected Darwin
   runtime. It contains no neural weights, source archives, OpenSSL, `_ssl`,
   `_hashlib`, network/TLS/HTTP/email/URL stacks, installer, or updater; `_sha2`
@@ -93,6 +95,10 @@ The principal tools are:
 
 - `prepare_release_identity.py`: derive and strictly round-trip the final
   identity from exact files and generated observations;
+- `canonical_python_authority.py`: validate the checked Linux release identity
+  and full v2 reproducibility payload with Linux's own validator, then bind its
+  exact files, shared-builder identity, interpreter source, tag object, source
+  companions, and wheel/sdist bytes into the Mac identity;
 - `prepare_bf1f_validation.py`: verify the checked bf1f producer manifest and
   f03-only Darwin lock, then emit an external candidate lock plus the exact
   native acceptance matrix. Its receipt always records that bf1f is disabled;
@@ -103,8 +109,9 @@ The principal tools are:
 - `compare_compression.py`: measure gzip/xz/zstd twice for both canonical tars;
 - `audit_corresponding_source_archive.py` and
   `audit_ready_run_archive.py`: hostile fresh-extraction and closure audits;
-- `verify_python_reproducibility.py`: coordinate independent canonical Python,
-  freezer, source, and ready-run builds with per-root receipts;
+- `verify_python_reproducibility.py`: revalidate the immutable Linux canonical
+  authority, then coordinate independent Mac freezer, source, and ready-run
+  builds with per-root receipts;
 - `audit_macho_closure.py`, `audit_module_native_inclusion.py`,
   `blackbox_macos_bundle.py`, `practical_matrix_macos.py`, and
   `verify_offline_processes.py`: native, minimization, behavior, performance,
@@ -136,6 +143,7 @@ one resource ID while retaining runtime `5341c48b…` byte-for-byte. The output
 is deliberately not a release input and cannot certify native validation.
 
 Only evidence from a real macOS 15 arm64 build may unblock the tracked swap.
-The candidate must rebuild the wheel and frozen runtime in independent roots,
-run every matrix case without skips, and reproduce all archive and evidence
-identities. Ubuntu bf1f results do not satisfy any Darwin gate.
+The candidate must consume the exact canonical wheel and rebuild the frozen
+runtime in independent Mac roots, run every matrix case without skips, and
+reproduce all archive and evidence identities. Ubuntu bf1f results do not
+satisfy any Darwin gate.

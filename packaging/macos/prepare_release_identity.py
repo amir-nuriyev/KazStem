@@ -28,6 +28,7 @@ from release_common import (
     verify_declared_archive_inventory,
     verify_file,
 )
+from canonical_python_authority import bind_authority
 
 
 CONFIG_SCHEMA = "kazstem-macos-release-config-v1"
@@ -168,6 +169,14 @@ GATE_ARGUMENTS = {
         "source-tree",
         "--canonical-artifacts",
         "artifacts",
+        "--python-build-identity",
+        "inputs/PYTHON-BUILD-IDENTITY.json",
+        "--linux-release-identity",
+        "inputs/LINUX-RELEASE-IDENTITY.json",
+        "--linux-reproducibility",
+        "inputs/linux-python-reproducibility.json",
+        "--python-interpreter-source",
+        "inputs/interpreter-source-file",
         "--payload",
         "inputs/source-payload",
         "--resources",
@@ -590,6 +599,7 @@ def _evidence(
     python_tool: str,
     artifact_filenames: dict[str, str],
     tar_filenames: dict[str, str],
+    interpreter_source_path: str,
 ) -> list[dict[str, Any]]:
     environment = {
         "LANG": "C",
@@ -616,6 +626,7 @@ def _evidence(
             "artifacts/wheel": f"artifacts/{artifact_filenames['wheel']}",
             "canonical/ready.tar": f"canonical/{tar_filenames['ready_run']}",
             "canonical/source.tar": f"canonical/{tar_filenames['corresponding_source']}",
+            "inputs/interpreter-source-file": interpreter_source_path,
         }
         arguments = [replacements.get(token, token) for token in GATE_ARGUMENTS[gate]]
         argv = [
@@ -757,6 +768,36 @@ def generate(args: argparse.Namespace) -> dict[str, Any]:
         resource_id=resource_id,
     )
     source_config = config["corresponding_source"]
+    if wheel.parent.resolve() != sdist.parent.resolve():
+        raise ReleaseError("canonical wheel and sdist must share one input directory")
+    authority = bind_authority(
+        repository=repository,
+        payload=payload,
+        python_build_identity_path=args.python_build_identity,
+        linux_release_identity_path=args.linux_release_identity,
+        linux_reproducibility_path=args.linux_reproducibility,
+        interpreter_source_path=args.python_interpreter_source,
+        canonical_artifacts=wheel.parent,
+        release_identity={
+            "release": release,
+            "source_commit": commit,
+            "source_tree": tree,
+            "source_origin": origin,
+            "source_ref": source_ref,
+            "source_date_epoch": config["source_date_epoch"],
+            "release_url": release_url,
+            "artifacts": artifacts,
+        },
+    )
+    missing_authority_paths = sorted(
+        {item["path"] for item in authority["source_companions"]}
+        - set(source_config["required_paths"])
+    )
+    if missing_authority_paths:
+        raise ReleaseError(
+            "corresponding-source required paths omit canonical authority inputs: "
+            f"{missing_authority_paths}"
+        )
     nested = _source_nested(
         payload,
         application_source=source_config["source_categories"]["application_source"],
@@ -814,23 +855,23 @@ def generate(args: argparse.Namespace) -> dict[str, Any]:
     if python_tool not in tool_names:
         raise ReleaseError("freezer Python is not a bound tool")
     tool_by_name = {tool["name"]: tool for tool in tools}
-    python_runtimes: dict[str, Any] = {}
-    for role, expected in (("canonical", "3.12.3"), ("freezer", "3.14.3")):
-        runtime_config = _exact(
-            config["python_runtimes"][role], {"tool"}, f"{role} Python runtime"
+    runtime_config = _exact(
+        config["python_runtimes"], {"freezer"}, "Python runtimes"
+    )["freezer"]
+    runtime_config = _exact(runtime_config, {"tool"}, "freezer Python runtime")
+    record = tool_by_name[runtime_config["tool"]]
+    version = record["version"].removeprefix("Python ").strip()
+    if version != "3.14.3":
+        raise ReleaseError(
+            f"freezer Python version must be 3.14.3, observed {version}"
         )
-        record = tool_by_name[runtime_config["tool"]]
-        version_output = record["version"]
-        version = version_output.removeprefix("Python ").strip()
-        if version != expected:
-            raise ReleaseError(
-                f"{role} Python version must be {expected}, observed {version}"
-            )
-        python_runtimes[role] = {
+    python_runtimes = {
+        "freezer": {
             "implementation": "CPython",
             "version": version,
             "executable": record["executable"],
         }
+    }
     compressor_tools = config["compression"]["tools"]
     compressors = {
         "gzip": {
@@ -1075,8 +1116,7 @@ def generate(args: argparse.Namespace) -> dict[str, Any]:
             "minimum_distinct_roots": config["reproducibility"]["build_roots"],
             "reproducibility": {
                 "build_roots": config["reproducibility"]["build_roots"],
-                "direct_build_argv": config["reproducibility"]["direct_build_argv"],
-                "sdist_build_argv": config["reproducibility"]["sdist_build_argv"],
+                "canonical_python_authority": authority,
                 "freezer_install_argv": config["reproducibility"][
                     "freezer_install_argv"
                 ],
@@ -1123,6 +1163,7 @@ def generate(args: argparse.Namespace) -> dict[str, Any]:
                     name: policy["canonical_tar"]["filename"]
                     for name, policy in compression.items()
                 },
+                interpreter_source_path=authority["interpreter_source"]["path"],
             ),
         },
     }
@@ -1158,6 +1199,10 @@ def main() -> int:
     parser.add_argument("--freezer-wheelhouse", required=True, type=Path)
     parser.add_argument("--freezer-requirements", required=True, type=Path)
     parser.add_argument("--build-stack", required=True, type=Path)
+    parser.add_argument("--python-build-identity", required=True, type=Path)
+    parser.add_argument("--linux-release-identity", required=True, type=Path)
+    parser.add_argument("--linux-reproducibility", required=True, type=Path)
+    parser.add_argument("--python-interpreter-source", required=True, type=Path)
     parser.add_argument("--runtime-source-lock", required=True, type=Path)
     parser.add_argument("--platform-asset-lock", required=True, type=Path)
     parser.add_argument("--staging-receipt", type=Path)
