@@ -55,31 +55,13 @@ jobs:
           repository = os.getcwd()
           sys.path[:0] = [repository, os.path.join(repository, 'src')]
           suite = unittest.defaultTestLoader.loadTestsFromNames([
-              'tests.test_backend',
-              'tests.test_guesser',
               'tests.test_windows_final_release_tooling',
-              'tests.test_canonical_python_builder',
-              'tests.test_process_supervisor',
           ])
           result = unittest.TextTestRunner(verbosity=2).run(suite)
           raise SystemExit(0 if result.wasSuccessful() else 1)
           '@
           $focused | python -I -B -X "pycache_prefix=$focusedPycache" - 2>&1 |
             Tee-Object -FilePath (Join-Path $env:RUNNER_TEMP 'kazstem-final-contract/focused-tests.txt')
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          $fullPycache = Join-Path $env:RUNNER_TEMP 'kazstem-final-full-pycache'
-          $full = @'
-          import os
-          import sys
-          import unittest
-          repository = os.getcwd()
-          sys.path[:0] = [repository, os.path.join(repository, 'src')]
-          suite = unittest.defaultTestLoader.discover('tests', pattern='test_*.py', top_level_dir='.')
-          result = unittest.TextTestRunner(verbosity=1).run(suite)
-          raise SystemExit(0 if result.wasSuccessful() else 1)
-          '@
-          $full | python -I -B -X "pycache_prefix=$fullPycache" - 2>&1 |
-            Tee-Object -FilePath (Join-Path $env:RUNNER_TEMP 'kazstem-final-contract/full-tests.txt')
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $forbiddenBytecode = Get-ChildItem -LiteralPath . -Recurse -Force |
             Where-Object { $_.Name -eq '__pycache__' -or $_.Extension -in @('.pyc', '.pyo', '.pyd') }
@@ -88,7 +70,6 @@ jobs:
           }
           $tree = git rev-parse 'HEAD^{tree}'
           $focusedHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $env:RUNNER_TEMP 'kazstem-final-contract/focused-tests.txt')).Hash.ToLowerInvariant()
-          $fullHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $env:RUNNER_TEMP 'kazstem-final-contract/full-tests.txt')).Hash.ToLowerInvariant()
           [ordered]@{
             schema = 'kazstem-windows-final-workflow-draft-v1'
             result = 'pass'
@@ -99,9 +80,8 @@ jobs:
             image_os = $env:ImageOS
             image_version = $env:ImageVersion
             focused_log_sha256 = $focusedHash
-            full_log_sha256 = $fullHash
             publishing_performed = $false
-            note = 'Contract tests only; no release identity or asset was frozen.'
+            note = 'Native Windows contract tests only; the platform-neutral full suite is gated separately. No release identity or asset was frozen.'
           } | ConvertTo-Json | Out-File `
             -FilePath (Join-Path $env:RUNNER_TEMP 'kazstem-final-contract/DRAFT-NOT-A-RELEASE.json') `
             -Encoding utf8

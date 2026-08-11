@@ -570,6 +570,12 @@ class WindowsReleaseCommonTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             repo = Path(temporary) / "repo"
             subprocess.run(["git", "init", "-q", str(repo)], check=True)
+            subprocess.run(
+                ["git", "config", "core.autocrlf", "false"], cwd=repo, check=True
+            )
+            subprocess.run(
+                ["git", "config", "core.eol", "lf"], cwd=repo, check=True
+            )
             (repo / "root.txt").write_text("root\n", encoding="utf-8")
             (repo / "nested/deeper").mkdir(parents=True)
             (repo / "nested/deeper/file.txt").write_text("nested\n", encoding="utf-8")
@@ -1421,9 +1427,15 @@ class WindowsReleaseCommonTests(unittest.TestCase):
                 observed["receipt_file"],
                 value["inputs"]["canonical_python_build_receipt"],
             )
-            validator.validate_receipt.assert_called_once_with(
-                {}, identity=canonical_identity, output_dir=dist
+            validator.validate_receipt.assert_called_once()
+            receipt, = validator.validate_receipt.call_args.args
+            self.assertEqual(receipt, {})
+            self.assertEqual(
+                validator.validate_receipt.call_args.kwargs["identity"],
+                canonical_identity,
             )
+            observed_output = validator.validate_receipt.call_args.kwargs["output_dir"]
+            self.assertTrue(observed_output.samefile(dist))
             canonical_identity["source_commit"] = "0" * 40
             with mock.patch.object(
                 common, "_load_canonical_python_builder", return_value=validator
@@ -1763,7 +1775,7 @@ class WindowsReleaseCommonTests(unittest.TestCase):
             for name in ("a", "b"):
                 root = base / name / "bundle"
                 (root / "dir").mkdir(parents=True)
-                (root / "dir/Қазақ.txt").write_text("бір\n", encoding="utf-8")
+                (root / "dir/Қазақ.txt").write_bytes("бір\n".encode("utf-8"))
                 (root / "kazstem.exe").write_bytes(b"MZ fixture")
                 roots.append(root)
             limits = common.ArchiveLimits(100, 1000, 5000, 200)
@@ -1779,7 +1791,10 @@ class WindowsReleaseCommonTests(unittest.TestCase):
                     1_786_320_000, (".exe", ".dll", ".pyd")
                 ),
             )
-            self.assertEqual((extracted / "dir/Қазақ.txt").read_text(), "бір\n")
+            self.assertEqual(
+                (extracted / "dir/Қазақ.txt").read_bytes(),
+                "бір\n".encode("utf-8"),
+            )
 
     def test_pe_identity_requires_amd64_pe32_plus_and_reports_certificate_table(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
