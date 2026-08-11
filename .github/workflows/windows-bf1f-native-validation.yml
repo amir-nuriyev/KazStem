@@ -1,0 +1,247 @@
+name: Temporary Windows bf1f native acceptance
+
+# This workflow exists only on a reversible validation branch. It uploads
+# private evidence and has no permission to tag, release, or publish packages.
+on:
+  push:
+    branches:
+      - codex/windows-bf1f-validation
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-bf1f:
+    name: Windows Server 2022 bf1f + 17a69 acceptance
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - name: Check out the exact temporary validation commit
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+
+      - name: Select CPython 3.14.3
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: 3.14.3
+
+      - name: Verify the reversible branch scope and payload identities
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $base = '693a752fb89602b5512a105687de431bf3f9546d'
+          $parent = git rev-parse 'HEAD^'
+          if ($parent -ne $base) { throw "validation parent differs: $parent" }
+          $changed = @(git diff --name-only $base HEAD)
+          $outside = @($changed | Where-Object {
+            $_ -ne '.github/workflows/windows-bf1f-native-validation.yml' -and
+            -not $_.StartsWith('validation/windows-bf1f/', [System.StringComparison]::Ordinal)
+          })
+          if ($outside) { throw "temporary validation changed final-source files: $($outside -join ', ')" }
+          $resource = 'validation/windows-bf1f/payload/resources.bf1f31ff6e5860585b9e4134f12dcfb9d6df8030ee87b368e5a5f29eb45c1188'
+          $manifestHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $resource 'manifest.json')).Hash.ToLowerInvariant()
+          if ($manifestHash -ne '8d596011020b21a903244490cc7201d348d7bcc5442ef736ec7e4ac5435083e1') { throw 'bf1f manifest hash differs' }
+          $wheel = 'validation/windows-bf1f/payload/kazstem-0.2.3-py3-none-any.whl'
+          $wheelHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $wheel).Hash.ToLowerInvariant()
+          if ((Get-Item -LiteralPath $wheel).Length -ne 101042 -or $wheelHash -ne '2c82ed5e9455eb59b84465ff8c8a0706317c64be9074c63b8c11a88b91743b8f') {
+            throw 'canonical wheel identity differs'
+          }
+
+      - name: Run checked Windows process and protocol contracts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          Get-ChildItem Env: | Where-Object {
+            $_.Name -eq 'PYTHONPATH' -or $_.Name -eq 'GLIBC_TUNABLES' -or
+            $_.Name.StartsWith('GIT_') -or $_.Name.StartsWith('LD_') -or
+            $_.Name.StartsWith('DYLD_')
+          } | ForEach-Object { Remove-Item -LiteralPath "Env:$($_.Name)" }
+          $work = Join-Path $env:RUNNER_TEMP 'kazstem-bf1f-windows'
+          New-Item -ItemType Directory -Path (Join-Path $work 'evidence') | Out-Null
+          "KAZSTEM_BF1F_WORK=$work" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          $cache = Join-Path $env:RUNNER_TEMP 'kazstem-bf1f-source-contract-cache'
+          $runner = @'
+          import os
+          import sys
+          import unittest
+          repository = os.getcwd()
+          sys.path[:0] = [repository, os.path.join(repository, 'src')]
+          names = [
+              'tests.test_windows_final_release_tooling.WindowsReleaseCommonTests.test_bounded_job_contains_immediate_grandchildren_on_every_path',
+              'tests.test_guesser.PersistentGuesserTests.test_windows_uses_bounded_one_shot_queries_instead_of_pipe_selectors',
+              'tests.test_guesser.PersistentGuesserTests.test_windows_one_shot_passes_a_plus_one_completeness_sentinel',
+              'tests.test_guesser.PersistentGuesserTests.test_windows_one_shot_timeout_terminates_the_helper',
+              'tests.test_guesser.PersistentGuesserTests.test_windows_one_shot_retries_strict_utf8_protocol_failure_once',
+              'tests.test_guesser.PersistentGuesserTests.test_windows_one_shot_rejects_non_lf_controls_and_extra_output',
+              'tests.test_guesser.PersistentGuesserTests.test_windows_one_shot_caps_discard_every_partial_candidate',
+              'tests.test_guesser.PersistentGuesserTests.test_windows_hard_stdout_cap_never_caches_partial_candidates',
+              'tests.test_guesser.PersistentGuesserTests.test_windows_hard_stderr_cap_reaps_helper_and_recovers',
+              'tests.test_guesser.PersistentGuesserTests.test_windows_reader_start_failure_still_reaps_helper',
+          ]
+          suite = unittest.defaultTestLoader.loadTestsFromNames(names)
+          result = unittest.TextTestRunner(verbosity=2).run(suite)
+          raise SystemExit(0 if result.wasSuccessful() else 1)
+          '@
+          $runner | python -I -B -X "pycache_prefix=$cache" - 2>&1 |
+            Tee-Object -FilePath (Join-Path $work 'evidence/source-contract.log')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Rebuild the exact locked runtime in two fresh roots
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $work = $env:KAZSTEM_BF1F_WORK
+          python packaging/windows/write_host_evidence.py `
+            --root . `
+            --candidate-sha '${{ github.sha }}' `
+            --runner-label windows-2022 `
+            --runner-os $env:RUNNER_OS `
+            --runner-arch $env:RUNNER_ARCH `
+            --image-os $env:ImageOS `
+            --image-version $env:ImageVersion `
+            --event-name '${{ github.event_name }}' `
+            --run-id '${{ github.run_id }}' `
+            --output (Join-Path $work 'evidence/host-evidence.json')
+          python packaging/windows/fetch_locked_inputs.py `
+            --lock scripts/platform_runtime_sources.windows-x86_64.lock.json `
+            --archives (Join-Path $work 'inputs/binaries') `
+            --sources (Join-Path $work 'inputs/sources') `
+            | Tee-Object -FilePath (Join-Path $work 'evidence/locked-downloads.log')
+          $common = @(
+            '--archives', (Join-Path $work 'inputs/binaries'),
+            '--sources', (Join-Path $work 'inputs/sources'),
+            '--source-lock', 'scripts/platform_runtime_sources.windows-x86_64.lock.json',
+            '--base-lock', 'src/qazmorph/platform_runtime_assets.lock.json'
+          )
+          python packaging/windows/build_runtime.py @common `
+            --output-parent (Join-Path $work 'build-a/platform-runtimes') `
+            --lock-output (Join-Path $work 'build-a/platform_runtime_assets.lock.json') `
+            --json (Join-Path $work 'build-a/runtime-build.json')
+          python packaging/windows/build_runtime.py @common `
+            --output-parent (Join-Path $work 'build-b/platform-runtimes') `
+            --lock-output (Join-Path $work 'build-b/platform_runtime_assets.lock.json') `
+            --json (Join-Path $work 'build-b/runtime-build.json')
+          python packaging/windows/compare_runtime_builds.py `
+            (Join-Path $work 'build-a/platform-runtimes') `
+            (Join-Path $work 'build-b/platform-runtimes') `
+            --output (Join-Path $work 'evidence/runtime-reproducibility.json')
+          $runtime = Join-Path $work 'build-a/platform-runtimes/17a69ae11ff3fd92a555e8c95571223cbe8b217ec409a0b9b368f0aed90ee465'
+          python scripts/audit_pe_runtime.py `
+            --runtime-dir $runtime `
+            --lock scripts/platform_runtime_sources.windows-x86_64.lock.json `
+            --output (Join-Path $work 'evidence/pe-closure-fresh.json')
+          Copy-Item (Join-Path $work 'build-a/runtime-build.json') (Join-Path $work 'evidence/runtime-build-a.json')
+          Copy-Item (Join-Path $work 'build-b/runtime-build.json') (Join-Path $work 'evidence/runtime-build-b.json')
+          Copy-Item (Join-Path $runtime 'manifest.json') (Join-Path $work 'evidence/runtime-manifest.json')
+
+      - name: Install the exact wheel offline and stage bf1f beside 17a69
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $work = $env:KAZSTEM_BF1F_WORK
+          $payload = Join-Path $env:GITHUB_WORKSPACE 'validation/windows-bf1f/payload'
+          $resourceSource = Join-Path $payload 'resources.bf1f31ff6e5860585b9e4134f12dcfb9d6df8030ee87b368e5a5f29eb45c1188'
+          $testRoot = Join-Path $work 'test-root'
+          New-Item -ItemType Directory -Path (Join-Path $testRoot 'platform-runtimes') -Force | Out-Null
+          $resource = Join-Path $testRoot 'resources.bf1f31ff6e5860585b9e4134f12dcfb9d6df8030ee87b368e5a5f29eb45c1188'
+          Copy-Item -LiteralPath $resourceSource -Destination $resource -Recurse
+          $runtime = Join-Path $testRoot 'platform-runtimes/17a69ae11ff3fd92a555e8c95571223cbe8b217ec409a0b9b368f0aed90ee465'
+          Copy-Item -LiteralPath (Join-Path $work 'build-a/platform-runtimes/17a69ae11ff3fd92a555e8c95571223cbe8b217ec409a0b9b368f0aed90ee465') -Destination $runtime -Recurse
+          $candidateLock = Join-Path $work 'candidate-platform_runtime_assets.lock.json'
+          python validation/windows-bf1f/validate_candidate.py prepare-lock `
+            --base-lock src/qazmorph/platform_runtime_assets.lock.json `
+            --output $candidateLock
+          $venv = Join-Path $work 'venv'
+          python -m venv $venv
+          $venvPython = Join-Path $venv 'Scripts/python.exe'
+          $wheel = Join-Path $payload 'kazstem-0.2.3-py3-none-any.whl'
+          $env:HTTP_PROXY = 'http://127.0.0.1:9'
+          $env:HTTPS_PROXY = 'http://127.0.0.1:9'
+          $env:ALL_PROXY = 'http://127.0.0.1:9'
+          $env:NO_PROXY = ''
+          & $venvPython -I -B -m pip install --no-index --no-deps --no-compile --disable-pip-version-check $wheel
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $site = Join-Path $venv 'Lib/site-packages'
+          $installedLock = Join-Path $site 'qazmorph/platform_runtime_assets.lock.json'
+          Copy-Item -LiteralPath $candidateLock -Destination $installedLock -Force
+          "KAZSTEM_BF1F_RESOURCE=$resource" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "KAZSTEM_BF1F_RUNTIME=$runtime" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "KAZSTEM_BF1F_VENV=$venv" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "KAZSTEM_BF1F_SITE=$site" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "KAZSTEM_BF1F_LOCK=$candidateLock" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Run the exact wheel resource suite and full native matrix
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          $work = $env:KAZSTEM_BF1F_WORK
+          Get-ChildItem Env: | Where-Object {
+            $_.Name -eq 'PYTHONPATH' -or $_.Name -eq 'PYTHONHOME' -or
+            $_.Name -eq 'GLIBC_TUNABLES' -or $_.Name.StartsWith('GIT_') -or
+            $_.Name.StartsWith('LD_') -or $_.Name.StartsWith('DYLD_')
+          } | ForEach-Object { Remove-Item -LiteralPath "Env:$($_.Name)" }
+          $env:QAZMORPH_RESOURCE_DIR = $env:KAZSTEM_BF1F_RESOURCE
+          $venvPython = Join-Path $env:KAZSTEM_BF1F_VENV 'Scripts/python.exe'
+          $integrationCache = Join-Path $env:RUNNER_TEMP 'kazstem-bf1f-integration-cache'
+          & $venvPython -I -B -X "pycache_prefix=$integrationCache" `
+            validation/windows-bf1f/validate_candidate.py integration `
+            --repository . `
+            --site-packages $env:KAZSTEM_BF1F_SITE `
+            --output (Join-Path $work 'evidence/wheel-integration.json') `
+            2>&1 | Tee-Object -FilePath (Join-Path $work 'evidence/wheel-integration.log')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $matrixCache = Join-Path $env:RUNNER_TEMP 'kazstem-bf1f-matrix-cache'
+          & $venvPython -I -B -X "pycache_prefix=$matrixCache" `
+            validation/windows-bf1f/validate_candidate.py validate `
+            --repository . `
+            --base-commit 693a752fb89602b5512a105687de431bf3f9546d `
+            --validation-commit '${{ github.sha }}' `
+            --base-lock src/qazmorph/platform_runtime_assets.lock.json `
+            --candidate-lock $env:KAZSTEM_BF1F_LOCK `
+            --installed-lock (Join-Path $env:KAZSTEM_BF1F_SITE 'qazmorph/platform_runtime_assets.lock.json') `
+            --resource $env:KAZSTEM_BF1F_RESOURCE `
+            --producer-manifest packaging/resource-producer/bf1f31ff6e5860585b9e4134f12dcfb9d6df8030ee87b368e5a5f29eb45c1188/RESOURCE-MANIFEST.json `
+            --runtime $env:KAZSTEM_BF1F_RUNTIME `
+            --wheel validation/windows-bf1f/payload/kazstem-0.2.3-py3-none-any.whl `
+            --python $venvPython `
+            --scripts (Join-Path $env:KAZSTEM_BF1F_VENV 'Scripts') `
+            --integration-receipt (Join-Path $work 'evidence/wheel-integration.json') `
+            --runtime-build (Join-Path $work 'evidence/runtime-build-a.json') `
+            --pe-audit (Join-Path $work 'evidence/pe-closure-fresh.json') `
+            --host-evidence (Join-Path $work 'evidence/host-evidence.json') `
+            --output (Join-Path $work 'evidence/windows-bf1f-acceptance.json') `
+            2>&1 | Tee-Object -FilePath (Join-Path $work 'evidence/windows-bf1f-acceptance.log')
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Copy-Item -LiteralPath $env:KAZSTEM_BF1F_LOCK -Destination (Join-Path $work 'evidence/candidate-platform_runtime_assets.lock.json')
+          [ordered]@{
+            schema = 'kazstem-windows-bf1f-validation-scope-v1'
+            result = 'pass'
+            base_commit = '693a752fb89602b5512a105687de431bf3f9546d'
+            validation_commit = '${{ github.sha }}'
+            temporary_payload_branch = $true
+            tracked_release_lock_changed = $false
+            publishing_performed = $false
+          } | ConvertTo-Json | Out-File -LiteralPath (Join-Path $work 'evidence/VALIDATION-SCOPE.json') -Encoding utf8
+          python packaging/windows/audit_evidence_paths.py `
+            --root (Join-Path $work 'evidence') `
+            --forbid $work `
+            --forbid $env:GITHUB_WORKSPACE `
+            --forbid $env:RUNNER_TEMP `
+            --output (Join-Path $work 'evidence/logical-evidence-path-audit.json')
+
+      - name: Upload private acceptance evidence only
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: kazstem-windows-bf1f-acceptance-${{ github.run_id }}
+          path: ${{ runner.temp }}/kazstem-bf1f-windows/evidence
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 9
