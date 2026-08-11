@@ -3,9 +3,6 @@ name: Temporary Windows bf1f native acceptance
 # This workflow exists only on a reversible validation branch. It uploads
 # private evidence and has no permission to tag, release, or publish packages.
 on:
-  push:
-    branches:
-      - codex/windows-bf1f-validation
   workflow_dispatch:
 
 permissions:
@@ -21,7 +18,7 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
-          fetch-depth: 2
+          fetch-depth: 0
 
       - name: Select CPython 3.14.3
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
@@ -34,8 +31,8 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $true
           $base = '693a752fb89602b5512a105687de431bf3f9546d'
-          $parent = git rev-parse 'HEAD^'
-          if ($parent -ne $base) { throw "validation parent differs: $parent" }
+          $mergeBase = git merge-base HEAD $base
+          if ($mergeBase -ne $base) { throw "validation history is not rooted at the exact base: $mergeBase" }
           $changed = @(git diff --name-only $base HEAD)
           $outside = @($changed | Where-Object {
             $_ -ne '.github/workflows/windows-bf1f-native-validation.yml' -and
